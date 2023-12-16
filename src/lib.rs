@@ -1,7 +1,13 @@
 mod db;
 mod tasks;
+mod weighting;
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
+
+use crate::{
+    tasks::{Priority, Task},
+    weighting::calculate_weight,
+};
 
 // This function is temporary.
 // I'm still figuring out how to best use main.rs vs lib.rs.
@@ -10,56 +16,32 @@ pub fn go() {
 
     let conn = db::connect_to_db();
 
-    let my_task_1 = tasks::build_task(
-        None,
-        true,
-        String::from("Do a cool dance"),
-        None,
-        None,
-        Utc::now(),
-        None,
-        tasks::Priority::P2,
-        None,
-        0,
-        1,
-    );
-    let my_task_2 = tasks::build_task(
-        None,
-        true,
-        String::from("Wash the dishes"),
-        Some(String::from("Use lots of soap")),
-        None,
-        Utc::now(),
-        None,
-        tasks::Priority::P2,
-        Some(100),
-        0,
-        1,
-    );
-    let my_task_3 = tasks::build_task(
-        None,
-        true,
-        String::from("Feed the plants"),
-        None,
-        None,
-        Utc::now(),
-        None,
-        tasks::Priority::P2,
-        None,
-        0,
-        1,
-    );
+    let my_task_1 = Task {
+        id: 1,
+        is_archived: false,
+        summary: String::from("Wash the dishes"),
+        description: Some(String::from("Use lots of soap")),
+        due_date: Some(Utc::now() + Duration::days(10)),
+        from_date: Utc::now(),
+        lead_days: Some(30),
+        priority: Priority::P3,
+        repeat_interval: None,
+        times_selected: 5,
+        times_shown: 15,
+    };
 
     db::add_task(&conn, my_task_1);
-    db::add_task(&conn, my_task_2);
-    db::add_task(&conn, my_task_3);
+    // db::add_task(&conn, my_task_2);
+    // db::add_task(&conn, my_task_3);
 
     db::delete_task_by_id(&conn, 5);
 
     let task_list = db::read_all_tasks(&conn);
 
     for task in task_list {
-        println!("Here's a task {:?}", task);
+        let weight = calculate_weight(&task);
+
+        println!("{} - {}", task.summary, weight);
     }
 
     println!("Finished lib.rs");
