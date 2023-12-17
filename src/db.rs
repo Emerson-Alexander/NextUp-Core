@@ -1,4 +1,5 @@
 use super::tasks::{Priority, Task};
+use chrono::{Duration, Utc};
 use rusqlite::{params, Connection};
 
 pub fn connect_to_db() -> Connection {
@@ -85,6 +86,11 @@ pub fn add_task(conn: &Connection, task: Task) {
 }
 
 pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
+    /*
+    Technically this is only reading the non-archived tasks. I may change that
+    if there's ever a use case for checking the archived tasks.
+    */
+
     // Prepare sqlite statement
     let mut stmt = conn
         .prepare(
@@ -100,7 +106,7 @@ pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
             repeat_interval, 
             times_selected, 
             times_shown
-        FROM tasks",
+        FROM tasks WHERE is_archived = 0",
         )
         .unwrap_or_else(|err| {
             panic!("Problem preparing SELECT statement: {err}");
@@ -149,18 +155,66 @@ pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
     // This might not be necessary if I was more comfortable with rusqlite.
     let mut query_result_as_vec: Vec<Task> = Vec::new();
     for row in rows {
-        query_result_as_vec.push(row.unwrap_or_else(|err| {
+        let task = row.unwrap_or_else(|err| {
             panic!("Problem unwrapping row after SELECT query: {err}");
-        }))
+        });
+
+        if task.repeat_interval.is_none()
+            || task.from_date + Duration::days(task.repeat_interval.unwrap_or(0) as i64)
+                < <Utc>::now()
+        {
+            query_result_as_vec.push(task)
+        }
     }
 
     query_result_as_vec
 }
 
-pub fn delete_task_by_id(conn: &Connection, id: u32) {
-    conn.execute("DELETE FROM tasks WHERE id=?1", [&id])
+// pub fn delete_task_by_id(conn: &Connection, id: u32) {
+//     conn.execute("DELETE FROM tasks WHERE id=?1", [&id])
+//         .unwrap_or_else(|err| {
+//             panic!("Problem deleting task {id} from table: {err}");
+//         });
+// }
+
+pub fn increment_times_shown(conn: &Connection, id: u32, times_shown: u32) {
+    conn.execute(
+        "UPDATE tasks SET times_shown=?1 WHERE id=?2",
+        [times_shown + 1, id],
+    )
+    .unwrap_or_else(|err| {
+        panic!("Problem updating task: {err}");
+    });
+}
+
+pub fn increment_times_selected(conn: &Connection, id: u32, times_selected: u32) {
+    conn.execute(
+        "UPDATE tasks SET times_selected=?1 WHERE id=?2",
+        [times_selected + 1, id],
+    )
+    .unwrap_or_else(|err| {
+        panic!("Problem updating task: {err}");
+    });
+}
+
+pub fn reset_from_date(conn: &Connection, id: u32) {
+    println!("Resetting from_date by id {}", &id);
+
+    conn.execute(
+        "UPDATE tasks SET from_date=? WHERE id=?",
+        params![<Utc>::now(), id],
+    )
+    .unwrap_or_else(|err| {
+        panic!("Problem updating task: {err}");
+    });
+}
+
+pub fn archive_task(conn: &Connection, id: u32) {
+    println!("Archiving task by id {}", &id);
+
+    conn.execute("UPDATE tasks SET is_archived=1 WHERE id=?", params![id])
         .unwrap_or_else(|err| {
-            panic!("Problem deleting task {id} from table: {err}");
+            panic!("Problem updating task: {err}");
         });
 }
 
@@ -260,31 +314,31 @@ mod tests {
         assert_eq!(source_data, test_data);
     }
 
-    #[test]
-    fn test_delete_task_by_id() {
-        // Prepare the in-memory db
-        let conn = connect_to_test_db();
-        let source_data = generate_basic_test_data();
-        for task in &source_data {
-            add_task(&conn, task.clone());
-        }
+    // #[test]
+    // fn test_delete_task_by_id() {
+    //     // Prepare the in-memory db
+    //     let conn = connect_to_test_db();
+    //     let source_data = generate_basic_test_data();
+    //     for task in &source_data {
+    //         add_task(&conn, task.clone());
+    //     }
 
-        // Remove items 2, 6, and 6 from the source data
-        let mut deleted_source_data: Vec<Task> = Vec::new();
-        for task in source_data {
-            if ![2, 4, 6].contains(&task.id) {
-                deleted_source_data.push(task)
-            }
-        }
+    //     // Remove items 2, 6, and 6 from the source data
+    //     let mut deleted_source_data: Vec<Task> = Vec::new();
+    //     for task in source_data {
+    //         if ![2, 4, 6].contains(&task.id) {
+    //             deleted_source_data.push(task)
+    //         }
+    //     }
 
-        // Run the delete function we're testing
-        delete_task_by_id(&conn, 2);
-        delete_task_by_id(&conn, 4);
-        delete_task_by_id(&conn, 6);
+    //     // Run the delete function we're testing
+    //     delete_task_by_id(&conn, 2);
+    //     delete_task_by_id(&conn, 4);
+    //     delete_task_by_id(&conn, 6);
 
-        // Read from the in-memory db
-        let test_data = read_all_tasks(&conn);
+    //     // Read from the in-memory db
+    //     let test_data = read_all_tasks(&conn);
 
-        assert_eq!(deleted_source_data, test_data);
-    }
+    //     assert_eq!(deleted_source_data, test_data);
+    // }
 }
