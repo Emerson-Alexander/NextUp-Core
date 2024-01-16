@@ -1,6 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
+use rusqlite::Connection;
 
-use crate::tasks::Task;
+use crate::{db, tasks::Task};
 
 use super::{Action, Priority};
 
@@ -25,7 +26,8 @@ pub fn select_action() -> Option<Action> {
 What action would you like to take?
 
 1. See what's up next
-2. Add a task\n"
+2. Add a task
+3. Visit the shop\n"
     );
 
     let mut input = String::new();
@@ -43,6 +45,8 @@ What action would you like to take?
         Some(Action::WhatsNext)
     } else if selection == Some(2) {
         Some(Action::AddTask)
+    } else if selection == Some(3) {
+        Some(Action::Shop)
     } else {
         None
     }
@@ -207,5 +211,43 @@ pub fn select_task() -> Option<Action> {
             }
         }
         None => Some(Action::ReturnToStart),
+    }
+}
+
+pub fn display_shop_banner() {
+    println!(
+        "
+===================
+  Backlist > Shop
+===================
+\n"
+    );
+}
+
+pub fn display_funds(funds: f32) {
+    println!("You have ${} remaining", funds);
+}
+
+pub fn request_transaction(conn: &Connection) {
+    println!("How much would you like to spend?");
+
+    let mut input = String::new();
+
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read line");
+
+    let selection: Option<f32> = match input.trim().parse() {
+        Ok(num) => Some(num),
+        Err(_) => None,
+    };
+
+    match selection {
+        Some(num) => {
+            if num != 0.0 {
+                db::add_transaction(conn, num * -1.0)
+            }
+        }
+        None => (),
     }
 }
