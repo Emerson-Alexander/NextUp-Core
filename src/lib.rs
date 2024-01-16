@@ -1,4 +1,5 @@
 mod db;
+mod finance;
 mod tasks;
 mod ui;
 mod weighting;
@@ -14,6 +15,7 @@ pub enum Action {
     ReturnToStart,
     AddTask,
     WhatsNext,
+    Shop,
     EditMode,
     SelectTask(usize),
 }
@@ -88,6 +90,16 @@ pub fn startup() {
 
     ui::wait_for_interaction();
 
+    // // TEST BEGINS
+    // db::add_transaction(&conn, 100.50);
+    // db::add_transaction(&conn, -45.75);
+    // // TEST ENDS
+
+    // TEST BEGINS
+    // finance::calc_funds(&conn);
+    // println!("{:?}", finance::calc_funds(&conn));
+    // TEST ENDS
+
     main_loop(conn)
 }
 
@@ -96,6 +108,7 @@ fn main_loop(conn: Connection) {
         match ui::select_action() {
             Some(Action::WhatsNext) => whats_next(&conn),
             Some(Action::AddTask) => add_a_task(&conn),
+            Some(Action::Shop) => visit_shop(&conn),
             None => continue,
             _ => continue,
         }
@@ -125,7 +138,9 @@ Backlist > Up Next
     let mut i = 1;
 
     for task in task_list.clone() {
-        println!("{}. $1.00\n  - {}", i, task.summary);
+        let bounty = finance::adjusted_value(conn, &task);
+
+        println!("{}. ${}\n  - {}", i, bounty, task.summary);
 
         if task.description.is_some() {
             println!("        {}", task.description.unwrap());
@@ -157,6 +172,7 @@ fn add_a_task(conn: &Connection) {
 }
 
 fn task_selected(conn: &Connection, task: &Task) {
+    finance::payout(conn, task);
     db::increment_times_selected(conn, task.id, task.times_selected);
 
     if task.repeat_interval.is_some() {
@@ -164,4 +180,12 @@ fn task_selected(conn: &Connection, task: &Task) {
     } else {
         db::archive_task(conn, task.id);
     }
+}
+
+fn visit_shop(conn: &Connection) {
+    ui::display_shop_banner();
+    ui::display_funds(finance::calc_funds(conn));
+    ui::request_transaction(conn);
+    ui::display_funds(finance::calc_funds(conn));
+    ui::wait_for_interaction();
 }
