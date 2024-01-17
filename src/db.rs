@@ -500,8 +500,6 @@ pub fn increment_times_selected(conn: &Connection, id: u32, times_selected: u32)
 }
 
 pub fn reset_from_date(conn: &Connection, id: u32) {
-    println!("Resetting from_date by id {}", &id);
-
     conn.execute(
         "UPDATE tasks SET from_date=? WHERE id=?",
         params![<Utc>::now(), id],
