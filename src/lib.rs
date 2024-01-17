@@ -172,6 +172,7 @@ fn add_a_task(conn: &Connection) {
 }
 
 fn task_selected(conn: &Connection, task: &Task) {
+    ui::display_task(task);
     finance::payout(conn, task);
     db::increment_times_selected(conn, task.id, task.times_selected);
 

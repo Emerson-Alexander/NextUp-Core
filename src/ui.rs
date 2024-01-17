@@ -214,6 +214,26 @@ pub fn select_task() -> Option<Action> {
     }
 }
 
+pub fn display_task(task: &Task) {
+    println!(
+        "
+============================
+  Backlist > Task Selected
+============================
+
+You have selected:
+
+{}",
+        task.summary
+    );
+
+    if task.description.is_some() {
+        println!("    {}", task.description.clone().unwrap());
+    }
+
+    println!("\n\n(Debug) ID: {}\n\n", task.id);
+}
+
 pub fn display_shop_banner() {
     println!(
         "
