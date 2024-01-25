@@ -11,182 +11,179 @@ use crate::{
     weighting::calculate_weight,
 };
 
-pub enum Action {
-    ReturnToStart,
+/// Enumerates the possible states that the application can be in.
+#[derive(Clone)]
+enum AppState {
+    /// Walks the user through adding a new task to the tasks table.
     AddTask,
-    WhatsNext,
+    /// Allows the user to edit a specific task.
+    EditTask,
+    /// Loops AppState::SelectAppState(). May add more functionality later.
+    MainLoop,
+    /// Where user can make adjustments to their funds.
     Shop,
-    EditMode,
-    SelectTask(usize),
+    /// Presents the user with 5 possible tasks to select.
+    ToDo,
 }
 
-// This function is temporary.
-// I'm still figuring out how to best use main.rs vs lib.rs.
-pub fn go() {
-    // loop {
-    //     match ui::select_action() {
-    //         Some(Action::ReturnToStart) => continue,
-    //         Some(Action::WhatsNext) => whats_next(),
-    //         Some(Action::AddTask) => add_a_task(),
-    //         None => continue,
-    //     }
-    // }
-
-    return;
-
-    // println!("Starting lib.rs");
-
-    // let conn = db::connect_to_db();
-
-    // let my_task_1 = Task {
-    //     id: 1,
-    //     is_archived: false,
-    //     summary: String::from("Wash the dishes"),
-    //     description: Some(String::from("Use lots of soap")),
-    //     due_date: Some(Utc::now() + Duration::days(10)),
-    //     from_date: Utc::now(),
-    //     lead_days: Some(30),
-    //     priority: Priority::P3,
-    //     repeat_interval: None,
-    //     times_selected: 5,
-    //     times_shown: 15,
-    // };
-
-    // db::add_task(&conn, my_task_1);
-    // // db::add_task(&conn, my_task_2);
-    // // db::add_task(&conn, my_task_3);
-
-    // db::delete_task_by_id(&conn, 5);
-
-    // let task_list = db::read_all_tasks(&conn);
-
-    // for task in task_list {
-    //     let weight = calculate_weight(&task);
-
-    //     println!("{} - {}", task.summary, weight);
-    // }
-
-    // println!("Finished lib.rs");
+trait ToString {
+    fn to_string(&self) -> &'static str;
 }
 
-pub fn startup() {
-    println!(
-        "
-=====================================================================
-
- /$$$$$$$    Welcome           /$$       /$$ /$$             /$$
-| $$__  $$         To         | $$      | $$|__/            | $$
-| $$  \\ $$  /$$$$$$   /$$$$$$$| $$   /$$| $$ /$$  /$$$$$$$ /$$$$$$
-| $$$$$$$  |____  $$ /$$_____/| $$  /$$/| $$| $$ /$$_____/|_  $$_/
-| $$__  $$  /$$$$$$$| $$      | $$$$$$/ | $$| $$|  $$$$$$   | $$
-| $$  \\ $$ /$$__  $$| $$      | $$_  $$ | $$| $$ \\____  $$  | $$ /$$
-| $$$$$$$/|  $$$$$$$|  $$$$$$$| $$ \\  $$| $$| $$ /$$$$$$$/  |  $$$$/
-|_______/  \\_______/ \\_______/|__/  \\__/|__/|__/|_______/    \\___/
-
-====================================================================="
-    );
-
-    let conn = db::connect_to_db();
-
-    ui::wait_for_interaction();
-
-    // // TEST BEGINS
-    // db::add_transaction(&conn, 100.50);
-    // db::add_transaction(&conn, -45.75);
-    // // TEST ENDS
-
-    // TEST BEGINS
-    // finance::calc_funds(&conn);
-    // println!("{:?}", finance::calc_funds(&conn));
-    // TEST ENDS
-
-    main_loop(conn)
-}
-
-fn main_loop(conn: Connection) {
-    loop {
-        match ui::select_action() {
-            Some(Action::WhatsNext) => whats_next(&conn),
-            Some(Action::AddTask) => add_a_task(&conn),
-            Some(Action::Shop) => visit_shop(&conn),
-            None => continue,
-            _ => continue,
+impl ToString for AppState {
+    fn to_string(&self) -> &'static str {
+        match self {
+            AppState::AddTask => "Add Task",
+            AppState::EditTask => "Edit Task",
+            AppState::MainLoop => "Home",
+            AppState::Shop => "Shop",
+            AppState::ToDo => "ToDo",
         }
     }
 }
 
-fn whats_next(conn: &Connection) {
-    println!(
-        "
-====================
-Backlist > Up Next  
-====================\n"
-    );
+/// Assumes the application state specified
+///
+/// # Arguments
+///
+/// * `state: AppState` - Determines which state to assume.
+/// * `conn: Option<&Connection>` - Allows the new state to connect to the db
+/// if necessary.
+fn assume_state(state: AppState, conn: Option<&Connection>) {
+    // Writing this once to avoid repeating myself
+    let db_lost =
+        String::from("Value was None, but expected Some(&Connection).\nLost connection to db.");
 
-    let mut task_list = db::read_all_tasks(conn);
+    match state {
+        AppState::AddTask => add_task(conn.expect(&db_lost)),
+        AppState::EditTask => unimplemented!(),
+        AppState::MainLoop => main_loop(conn.expect(&db_lost)),
+        AppState::Shop => shop(conn.expect(&db_lost)),
+        AppState::ToDo => to_do(conn.expect(&db_lost)),
+    }
+}
 
+/// Initializes the program for use by a user through the TUI.
+///
+/// # Notes
+///
+/// This function is intentionally untested.
+pub fn startup() {
+    ui::print_logo();
+
+    let conn = db::connect_to_db();
+    db::init_tables(&conn);
+
+    // // For testing use only
+    // // See https://github.com/Emerson-Alexander/backlist/issues/17
+    // // Begin testing block
+    // db::default_settings(&conn);
+    // // End testing block
+
+    // We do not display the wait_for_interaction() screen until db
+    // initialization has been completed. This stops the user from getting to
+    // the program's main loop too early.
+    ui::wait_for_interaction();
+    assume_state(AppState::MainLoop, Some(&conn))
+}
+
+/// Asks the user to select one of the top-level app states.
+///
+/// # Arguments
+///
+/// * `conn: &Connection` - main_loop will be launching AppStates that require
+/// a &Connection, so it requires one too.
+///
+/// # Notes
+///
+/// main_loop is looped so that the functions of other AppStates can just end
+/// and come back here. This allows us to avoid passing the &Connection to
+/// functions that don't need it.
+fn main_loop(conn: &Connection) {
+    loop {
+        ui::print_header(AppState::MainLoop);
+
+        assume_state(
+            ui::select_app_state(&[AppState::ToDo, AppState::Shop, AppState::AddTask]),
+            Some(conn),
+        );
+    }
+}
+
+fn add_task(conn: &Connection) {
+    ui::print_header(AppState::AddTask);
+
+    let task = ui::request_task_input();
+
+    db::add_task(conn, task)
+}
+
+fn shop(conn: &Connection) {
+    ui::print_header(AppState::Shop);
+    ui::display_funds(finance::calc_funds(conn));
+    ui::request_transaction(conn);
+    ui::display_funds(finance::calc_funds(conn));
+    ui::wait_for_interaction();
+}
+
+fn to_do(conn: &Connection) {
+    ui::print_header(AppState::ToDo);
+
+    // Collect a list of all active tasks
+    let mut task_list = db::read_active_tasks(conn);
+
+    // Order the list
     task_list.sort_by(|a, b| {
         calculate_weight(b)
             .partial_cmp(&calculate_weight(a))
             .unwrap()
     });
 
+    // Shorten the list to the top 5
     if task_list.len() > 5 {
         task_list.drain(5..);
     }
 
-    let mut i = 1;
-
-    for task in task_list.clone() {
-        let bounty = finance::adjusted_value(conn, &task);
-
-        println!("{}. ${}\n  - {}", i, bounty, task.summary);
-
-        if task.description.is_some() {
-            println!("        {}", task.description.unwrap());
-        }
-
+    // Record that each task has been displayed
+    for task in &task_list {
         db::increment_times_shown(conn, task.id, task.times_shown);
-
-        i += 1;
     }
 
-    loop {
-        match ui::select_task() {
-            Some(Action::ReturnToStart) => break,
-            Some(Action::SelectTask(num)) => {
-                task_selected(&conn, task_list.get(num - 1).unwrap());
-                ui::wait_for_interaction();
-                break;
-            }
-            Some(Action::EditMode) => println!("Coming Soon!"),
-            _ => continue,
-        }
-    }
-}
+    // Calculate the bounty for each task
+    let tasks_w_bounties: Vec<(Task, f64)> = task_list
+        .iter()
+        .map(|task| (task.clone(), finance::adjusted_value(conn, &task)))
+        .collect();
 
-fn add_a_task(conn: &Connection) {
-    let task = ui::request_task_input();
+    // User selects a task from the remaining list
+    let (selected_task, bounty) = ui::select_task(&tasks_w_bounties);
 
-    db::add_task(conn, task)
-}
+    // Record that the task has been selected
+    db::increment_times_selected(conn, selected_task.id, selected_task.times_selected);
 
-fn task_selected(conn: &Connection, task: &Task) {
-    ui::display_task(task);
-    finance::payout(conn, task);
-    db::increment_times_selected(conn, task.id, task.times_selected);
-
-    if task.repeat_interval.is_some() {
-        db::reset_from_date(conn, task.id);
-    } else {
-        db::archive_task(conn, task.id);
-    }
-}
-
-fn visit_shop(conn: &Connection) {
-    ui::display_shop_banner();
-    ui::display_funds(finance::calc_funds(conn));
-    ui::request_transaction(conn);
-    ui::display_funds(finance::calc_funds(conn));
+    // Display the selected task
+    ui::display_task(&selected_task);
     ui::wait_for_interaction();
+
+    // Payout the bounty
+    db::add_transaction(conn, bounty);
+
+    // Record the task as complete
+    if selected_task.repeat_interval.is_some() {
+        db::reset_from_date(conn, selected_task.id);
+    } else {
+        db::archive_task(conn, selected_task.id);
+    }
 }
+
+// fn task_selected(conn: &Connection, task: &Task) {
+//     ui::display_task(task);
+//     finance::payout(conn, task);
+//     db::increment_times_selected(conn, task.id, task.times_selected);
+
+//     if task.repeat_interval.is_some() {
+//         db::reset_from_date(conn, task.id);
+//     } else {
+//         db::archive_task(conn, task.id);
+//     }
+// }

@@ -1,12 +1,42 @@
+//! # Ui
+//!
+//! This module contains functions related to printing to terminal I/O. Anything
+//! that the user interacts with will be created here.
+
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
 
-use crate::{db, tasks::Task};
+use crate::{db, finance, tasks::Task, ToString};
 
-use super::{Action, Priority};
+use super::{AppState, Priority};
+// use super::{Action, AppState, Priority};
 
 use std::io;
 
+/// Print the Backlist logo to terminal.
+///
+/// # Notes
+///
+/// This function is intentionally untested.
+pub fn print_logo() {
+    println!(
+        "
+=====================================================================
+
+ /$$$$$$$    Welcome           /$$       /$$ /$$             /$$
+| $$__  $$         To         | $$      | $$|__/            | $$
+| $$  \\ $$  /$$$$$$   /$$$$$$$| $$   /$$| $$ /$$  /$$$$$$$ /$$$$$$
+| $$$$$$$  |____  $$ /$$_____/| $$  /$$/| $$| $$ /$$_____/|_  $$_/
+| $$__  $$  /$$$$$$$| $$      | $$$$$$/ | $$| $$|  $$$$$$   | $$
+| $$  \\ $$ /$$__  $$| $$      | $$_  $$ | $$| $$ \\____  $$  | $$ /$$
+| $$$$$$$/|  $$$$$$$|  $$$$$$$| $$ \\  $$| $$| $$ /$$$$$$$/  |  $$$$/
+|_______/  \\_______/ \\_______/|__/  \\__/|__/|__/|_______/    \\___/
+
+====================================================================="
+    );
+}
+
+/// Requires the user to press enter before the program will continue.
 pub fn wait_for_interaction() {
     println!("\nPress <ENTER> to continue\n");
 
@@ -16,51 +46,156 @@ pub fn wait_for_interaction() {
         .expect("Failed to read line");
 }
 
-pub fn select_action() -> Option<Action> {
+/// Prints a unified header repersenting the passed AppState
+///
+/// # Arguments
+///
+/// * `app_state: AppState` - The AppState to be displayed.
+///
+/// # Examples
+///
+/// ```
+/// print_header(AppState::Shop)
+/// // Should print:
+/// // ===================
+/// //   Backlist > Shop
+/// // ===================
+/// ```
+///
+/// # Notes
+///
+/// To change what displays before the state title, see `aux_info: String`.
+pub fn print_header(app_state: AppState) {
+    let title = app_state.to_string();
+    // let title = match app_state {
+    //     AppState::AddTask => String::from("Add Task"),
+    //     AppState::EditTask => String::from("Edit Task"),
+    //     // TODO: MainLoop shouldn't need a Connection here.
+    //     AppState::MainLoop => String::from("Home"),
+    //     AppState::Shop => String::from("Shop"),
+    //     AppState::ToDo => String::from("ToDo"),
+    // };
+
+    let aux_info = String::from("Backlist > ");
+
+    let border_len = title.len() + aux_info.len() + 4;
+    let mut border = String::with_capacity(border_len);
+    for _ in 0..border_len {
+        border.push('=');
+    }
+
     println!(
         "
-===================
-  Backlist > Home  
-===================
-
-What action would you like to take?
-
-1. See what's up next
-2. Add a task
-3. Visit the shop\n"
+{}
+  {}{}
+{}",
+        border, aux_info, title, border
     );
+}
 
-    let mut input = String::new();
+/// Asks the user to select from a list of AppStates
+///
+/// # Arguments
+///
+/// * `states: &[AppState]` - The slice of AppStates for the user to select
+/// from. Will display in the order provided.
+///
+/// # Returns
+///
+/// The selected AppState
+///
+/// # Notes
+///
+/// Will inform the user and retry if the user attempts to select a bad input.
+pub fn select_app_state(states: &[AppState]) -> AppState {
+    // We loop to retry bad inputs
+    loop {
+        println!(
+            "
+What would you like to do?\n"
+        );
 
-    io::stdin()
-        .read_line(&mut input)
-        .expect("Failed to read line");
+        // Print the ordered list for the user to select from
+        for (index, state) in states.iter().enumerate() {
+            println!("{}. {}", index + 1, state.to_string());
+        }
+        print!("\n");
 
-    let selection: Option<u8> = match input.trim().parse() {
-        Ok(num) => Some(num),
-        Err(_) => None,
-    };
+        // Request user input
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
 
-    if selection == Some(1) {
-        Some(Action::WhatsNext)
-    } else if selection == Some(2) {
-        Some(Action::AddTask)
-    } else if selection == Some(3) {
-        Some(Action::Shop)
-    } else {
-        None
+        // Check that the input is valid, then return the AppState or continue the loop.
+        match input.trim().parse::<usize>() {
+            Ok(num) => {
+                // Here we make sure the value selected fits into the array before continuing.
+                if num > 0 && num <= states.len() {
+                    return states[num - 1].clone();
+                } else {
+                    println!("\nInvallid Input!");
+                    continue;
+                }
+            }
+            Err(_) => {
+                println!("\nInvalid Input!");
+                continue;
+            }
+        };
+    }
+}
+
+pub fn select_task(tasks: &[(Task, f64)]) -> (Task, f64) {
+    // We loop to retry bad inputs
+    loop {
+        println!(
+            "
+Select a task to complete.\n"
+        );
+
+        // Print the ordered list for the user to select from
+        for (index, tup) in tasks.iter().enumerate() {
+            // Unwrap the tuple
+            let (task, bounty) = tup;
+
+            // Display the tasks index, bounty, and summary
+            println!("{}. ${}\n  - {}", index + 1, bounty, task.summary);
+
+            // Display the description only if it exists
+            if task.description.is_some() {
+                println!("        {}", task.description.as_ref().unwrap());
+            }
+        }
+        print!("\n");
+
+        // Request user input
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
+
+        // Check that the input is valid, then return the AppState or continue the loop.
+        match input.trim().parse::<usize>() {
+            Ok(num) => {
+                // Here we make sure the value selected fits into the array before continuing.
+                if num > 0 && num <= tasks.len() {
+                    return tasks[num - 1].clone();
+                } else {
+                    println!("\nInvallid Input!");
+                    continue;
+                }
+            }
+            Err(_) => {
+                println!("\nInvalid Input!");
+                continue;
+            }
+        };
     }
 }
 
 pub fn request_task_input() -> Task {
-    println!(
-        "
-=======================
-  Backlist > New Task  
-=======================
-
-Enter task summary\n"
-    );
+    println!("\nEnter task summary\n");
 
     let mut summary_io = String::new();
 
@@ -186,33 +321,33 @@ What type of task is this?
     }
 }
 
-pub fn select_task() -> Option<Action> {
-    println!("\nSelect a task to complete, or select 0 to edit tasks\n");
+// pub fn select_task() -> Option<Action> {
+//     println!("\nSelect a task to complete, or select 0 to edit tasks\n");
 
-    let mut input = String::new();
+//     let mut input = String::new();
 
-    io::stdin()
-        .read_line(&mut input)
-        .expect("Failed to read line");
+//     io::stdin()
+//         .read_line(&mut input)
+//         .expect("Failed to read line");
 
-    let selection: Option<usize> = match input.trim().parse() {
-        Ok(num) => Some(num),
-        Err(_) => None,
-    };
+//     let selection: Option<usize> = match input.trim().parse() {
+//         Ok(num) => Some(num),
+//         Err(_) => None,
+//     };
 
-    match selection {
-        Some(num) => {
-            if num == 0 {
-                Some(Action::EditMode)
-            } else if num <= 5 {
-                Some(Action::SelectTask(num))
-            } else {
-                None
-            }
-        }
-        None => Some(Action::ReturnToStart),
-    }
-}
+//     match selection {
+//         Some(num) => {
+//             if num == 0 {
+//                 Some(Action::EditMode)
+//             } else if num <= 5 {
+//                 Some(Action::SelectTask(num))
+//             } else {
+//                 None
+//             }
+//         }
+//         None => Some(Action::ReturnToStart),
+//     }
+// }
 
 pub fn display_task(task: &Task) {
     println!(
@@ -231,25 +366,26 @@ You have selected:
         println!("    {}", task.description.clone().unwrap());
     }
 
-    println!("\n\n(Debug) ID: {}\n\n", task.id);
+    println!("\n\n(Debug) ID: {}\n", task.id);
 }
 
-pub fn display_shop_banner() {
-    println!(
-        "
-===================
-  Backlist > Shop
-===================
-\n"
-    );
-}
+// pub fn display_shop_banner() {
+//     println!(
+//         "
+// ===================
+//   Backlist > Shop
+// ===================
+// \n"
+//     );
+// }
 
-pub fn display_funds(funds: f32) {
-    println!("You have ${} remaining", funds);
+pub fn display_funds(funds: f64) {
+    // Only displays funds to 2 decimal places
+    println!("\nYou have ${:.2} remaining", funds);
 }
 
 pub fn request_transaction(conn: &Connection) {
-    println!("How much would you like to spend?");
+    println!("\nHow much would you like to spend?");
 
     let mut input = String::new();
 
@@ -257,7 +393,7 @@ pub fn request_transaction(conn: &Connection) {
         .read_line(&mut input)
         .expect("Failed to read line");
 
-    let selection: Option<f32> = match input.trim().parse() {
+    let selection: Option<f64> = match input.trim().parse() {
         Ok(num) => Some(num),
         Err(_) => None,
     };

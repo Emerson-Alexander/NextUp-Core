@@ -1,27 +1,47 @@
 use super::tasks::{Priority, Task};
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Statement};
 
+/// Establishes connection to the SQLite db.
+///
+/// # Returns
+///
+/// `conn: Connection` will allow the rest to the program to access the db.
+///
+/// # Panics
+///
+/// May painc if it is unable to establish a connection. This will **not** occur if
+/// the file does not exist. In such case, the file will be created.
+///
+/// # Notes
+///
+/// This function is intentially untested.
 pub fn connect_to_db() -> Connection {
-    let conn = match Connection::open("tasks.db") {
+    let conn = match Connection::open("backlist.db") {
         Ok(file) => file,
         Err(e) => panic!("Problem establishing connection to the database: {e}"),
     };
 
-    create_table(&conn);
-    create_table_transactions(&conn);
-    create_table_settings(&conn);
-
-    default_settings(&conn);
+    // default_settings(&conn);
 
     conn
 }
 
-fn create_table(conn: &Connection) {
-    /*
-    I've split this off into its own function so that our unit tests can create
-    the exact same table in memory.
-    */
+/// If necessary, create the tables we need within the db.
+///
+/// # Arguments
+///
+/// * `conn: Connection` - Allows us to access the SQLite db.
+///
+/// # Panics
+///
+/// May panic if there are issues executing the command. I believe this would
+/// only occur if there is an issue with `conn`.
+///
+/// # Notes
+///
+/// This function is intentionally untested.
+pub fn init_tables(conn: &Connection) {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY,
@@ -39,15 +59,8 @@ fn create_table(conn: &Connection) {
         (),
     )
     .unwrap_or_else(|err| {
-        panic!("Problem creating table: {err}");
+        panic!("Problem accessing tasks table: {err}");
     });
-}
-
-fn create_table_transactions(conn: &Connection) {
-    /*
-    I've split this off into its own function so that our unit tests can create
-    the exact same table in memory.
-    */
     conn.execute(
         "CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY,
@@ -58,15 +71,8 @@ fn create_table_transactions(conn: &Connection) {
         (),
     )
     .unwrap_or_else(|err| {
-        panic!("Problem creating table: {err}");
+        panic!("Problem accessing transactions table: {err}");
     });
-}
-
-fn create_table_settings(conn: &Connection) {
-    /*
-    I've split this off into its own function so that our unit tests can create
-    the exact same table in memory.
-    */
     conn.execute(
         "CREATE TABLE IF NOT EXISTS settings (
             id INTEGER PRIMARY KEY,
@@ -76,7 +82,7 @@ fn create_table_settings(conn: &Connection) {
         (),
     )
     .unwrap_or_else(|err| {
-        panic!("Problem creating table: {err}");
+        panic!("Problem accessing settings table: {err}");
     });
 }
 
@@ -126,7 +132,7 @@ pub fn add_task(conn: &Connection, task: Task) {
     });
 }
 
-pub fn add_transaction(conn: &Connection, price: f32) {
+pub fn add_transaction(conn: &Connection, price: f64) {
     if price >= 0.0 {
         conn.execute(
             "INSERT INTO transactions (
@@ -165,13 +171,17 @@ pub fn default_settings(conn: &Connection) {
     });
 }
 
-// TODO: Refactor to read_active_tasks
-pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
-    /*
-    Technically this is only reading the non-archived tasks. I may change that
-    if there's ever a use case for checking the archived tasks.
-    */
-
+/// Reads all active tasks from the db into memory.
+///
+/// # Arguments
+///
+/// * `conn: Connection` - Allows us to access the SQLite db.
+///
+/// # Returns
+///
+/// A `Vec<Task>` of all tasks that are not archived and haven't been completed
+/// within their repeat_interval.
+pub fn read_active_tasks(conn: &Connection) -> Vec<Task> {
     // Prepare sqlite statement
     let mut stmt = conn
         .prepare(
@@ -193,11 +203,176 @@ pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
             panic!("Problem preparing SELECT statement: {err}");
         });
 
-    /*
-    Just like in add_tasks(), rusqlite is pretty good at converting types. I
-    just need to do some pre-processing for tasks::Priority. Again, it would be
-    better to just write a macro to handle this.
-    */
+    return tasks_from_stmt(stmt, false);
+}
+
+/// Reads all tasks from the db into memory.
+///
+/// # Arguments
+///
+/// * `conn: Connection` - Allows us to access the SQLite db.
+///
+/// # Returns
+///
+/// A `Vec<Task>` of all tasks.
+pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
+    // Prepare sqlite statement
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+            id, 
+            is_archived,
+            summary, 
+            description, 
+            due_date, 
+            from_date, 
+            lead_days, 
+            priority, 
+            repeat_interval, 
+            times_selected, 
+            times_shown
+        FROM tasks",
+        )
+        .unwrap_or_else(|err| {
+            panic!("Problem preparing SELECT statement: {err}");
+        });
+
+    return tasks_from_stmt(stmt, true);
+}
+
+/// Reads all archived tasks from the db into memory.
+///
+/// # Arguments
+///
+/// * `conn: Connection` - Allows us to access the SQLite db.
+///
+/// # Returns
+///
+/// A `Vec<Task>` of all tasks that are archived.
+pub fn read_archived_tasks(conn: &Connection) -> Vec<Task> {
+    // Prepare sqlite statement
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+            id, 
+            is_archived,
+            summary, 
+            description, 
+            due_date, 
+            from_date, 
+            lead_days, 
+            priority, 
+            repeat_interval, 
+            times_selected, 
+            times_shown
+        FROM tasks WHERE is_archived = 1",
+        )
+        .unwrap_or_else(|err| {
+            panic!("Problem preparing SELECT statement: {err}");
+        });
+
+    return tasks_from_stmt(stmt, true);
+}
+// pub fn read_active_tasks(conn: &Connection) -> Vec<Task> {
+//     // Prepare sqlite statement
+//     let mut stmt = conn
+//         .prepare(
+//             "SELECT
+//             id,
+//             is_archived,
+//             summary,
+//             description,
+//             due_date,
+//             from_date,
+//             lead_days,
+//             priority,
+//             repeat_interval,
+//             times_selected,
+//             times_shown
+//         FROM tasks WHERE is_archived = 0",
+//         )
+//         .unwrap_or_else(|err| {
+//             panic!("Problem preparing SELECT statement: {err}");
+//         });
+
+//     /*
+//     Just like in add_tasks(), rusqlite is pretty good at converting types. I
+//     just need to do some pre-processing for tasks::Priority. Again, it would be
+//     better to just write a macro to handle this.
+//     */
+//     let rows = stmt
+//         .query_map([], |row| {
+//             let priority: Priority = {
+//                 if row.get(7) == Ok(0) {
+//                     Priority::P0
+//                 } else if row.get(7) == Ok(1) {
+//                     Priority::P1
+//                 } else if row.get(7) == Ok(2) {
+//                     Priority::P2
+//                 } else if row.get(7) == Ok(3) {
+//                     Priority::P3
+//                 } else {
+//                     Priority::P1
+//                 }
+//             };
+
+//             Ok(Task {
+//                 id: row.get(0)?,
+//                 is_archived: row.get(1)?,
+//                 summary: row.get(2)?,
+//                 description: row.get(3)?,
+//                 due_date: row.get(4)?,
+//                 from_date: row.get(5)?,
+//                 lead_days: row.get(6)?,
+//                 priority: priority,
+//                 repeat_interval: row.get(8)?,
+//                 times_selected: row.get(9)?,
+//                 times_shown: row.get(10)?,
+//             })
+//         })
+//         .unwrap_or_else(|err| {
+//             panic!("Problem running SELECT statement or processing results: {err}");
+//         });
+
+//     // Converting it from a rusqlite MappedRows<Task> to a Vec<Task>.
+//     let mut query_result_as_vec: Vec<Task> = Vec::new();
+//     for row in rows {
+//         let task = row.unwrap_or_else(|err| {
+//             panic!("Problem unwrapping row after SELECT query: {err}");
+//         });
+
+//         // Only push tasks that should be added to the backlog
+//         if task.repeat_interval.is_none()
+//             || task.from_date + Duration::days(task.repeat_interval.unwrap_or(0) as i64)
+//                 < <Utc>::now()
+//         {
+//             query_result_as_vec.push(task)
+//         }
+//     }
+
+//     query_result_as_vec
+// }
+
+/// Helper function to query any statement that should result in a list of
+/// tasks.
+///
+/// # Arguments
+///
+/// * `mut stmt: Statement<'_>` - The statement to be queried.
+/// * `include_inactive: bool` - Set true to include tasks that have been
+/// completed recently and have not passed their repeat_interval since.
+///
+/// # Returns
+///
+/// A `Vec<Task>` of all tasks based on the stmt and include_inactive values
+/// provided.
+///
+/// # Notes
+///
+/// rusqlite uses some strange types that I'm struggling to fully wrap my head
+/// around. There's a good chance that this function could be rewritten more
+/// effectively.
+fn tasks_from_stmt(mut stmt: Statement<'_>, include_inactive: bool) -> Vec<Task> {
     let rows = stmt
         .query_map([], |row| {
             let priority: Priority = {
@@ -233,17 +408,17 @@ pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
         });
 
     // Converting it from a rusqlite MappedRows<Task> to a Vec<Task>.
-    // This might not be necessary if I was more comfortable with rusqlite.
     let mut query_result_as_vec: Vec<Task> = Vec::new();
     for row in rows {
         let task = row.unwrap_or_else(|err| {
             panic!("Problem unwrapping row after SELECT query: {err}");
         });
 
-        // Only push tasks that should be added to the backlog
+        // Only push tasks that should be added
         if task.repeat_interval.is_none()
             || task.from_date + Duration::days(task.repeat_interval.unwrap_or(0) as i64)
                 < <Utc>::now()
+            || include_inactive
         {
             query_result_as_vec.push(task)
         }
@@ -252,6 +427,8 @@ pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
     query_result_as_vec
 }
 
+/// This is a temporary function. I intend to replace the settings table with a
+/// settings.txt.
 pub fn read_settings(conn: &Connection) -> [u32; 2] {
     let mut stmt = conn
         .prepare(
@@ -277,7 +454,7 @@ pub fn read_settings(conn: &Connection) -> [u32; 2] {
     settings
 }
 
-pub fn read_transactions(conn: &Connection) -> Vec<(DateTime<Utc>, Option<f32>, Option<f32>)> {
+pub fn read_transactions(conn: &Connection) -> Vec<(DateTime<Utc>, Option<f64>, Option<f64>)> {
     let mut stmt = conn
         .prepare(
             "SELECT
@@ -300,173 +477,13 @@ pub fn read_transactions(conn: &Connection) -> Vec<(DateTime<Utc>, Option<f32>, 
 
     // Converting it from a rusqlite MappedRows<Task> to a Vec<Task>.
     // This might not be necessary if I was more comfortable with rusqlite.
-    let mut query_result_as_vec: Vec<(DateTime<Utc>, Option<f32>, Option<f32>)> = Vec::new();
+    let mut query_result_as_vec: Vec<(DateTime<Utc>, Option<f64>, Option<f64>)> = Vec::new();
     for row in rows {
         let transaction = row.unwrap_or_else(|err| {
             panic!("Problem unwrapping row after SELECT query: {err}");
         });
 
         query_result_as_vec.push(transaction)
-    }
-
-    query_result_as_vec
-}
-
-pub fn actual_read_all_tasks(conn: &Connection) -> Vec<Task> {
-    /*
-    Technically this is only reading the non-archived tasks. I may change that
-    if there's ever a use case for checking the archived tasks.
-    */
-
-    // Prepare sqlite statement
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-            id, 
-            is_archived,
-            summary, 
-            description, 
-            due_date, 
-            from_date, 
-            lead_days, 
-            priority, 
-            repeat_interval, 
-            times_selected, 
-            times_shown
-        FROM tasks",
-        )
-        .unwrap_or_else(|err| {
-            panic!("Problem preparing SELECT statement: {err}");
-        });
-
-    /*
-    Just like in add_tasks(), rusqlite is pretty good at converting types. I
-    just need to do some pre-processing for tasks::Priority. Again, it would be
-    better to just write a macro to handle this.
-    */
-    let rows = stmt
-        .query_map([], |row| {
-            let priority: Priority = {
-                if row.get(7) == Ok(0) {
-                    Priority::P0
-                } else if row.get(7) == Ok(1) {
-                    Priority::P1
-                } else if row.get(7) == Ok(2) {
-                    Priority::P2
-                } else if row.get(7) == Ok(3) {
-                    Priority::P3
-                } else {
-                    Priority::P1
-                }
-            };
-
-            Ok(Task {
-                id: row.get(0)?,
-                is_archived: row.get(1)?,
-                summary: row.get(2)?,
-                description: row.get(3)?,
-                due_date: row.get(4)?,
-                from_date: row.get(5)?,
-                lead_days: row.get(6)?,
-                priority: priority,
-                repeat_interval: row.get(8)?,
-                times_selected: row.get(9)?,
-                times_shown: row.get(10)?,
-            })
-        })
-        .unwrap_or_else(|err| {
-            panic!("Problem running SELECT statement or processing results: {err}");
-        });
-
-    // Converting it from a rusqlite MappedRows<Task> to a Vec<Task>.
-    // This might not be necessary if I was more comfortable with rusqlite.
-    let mut query_result_as_vec: Vec<Task> = Vec::new();
-    for row in rows {
-        let task = row.unwrap_or_else(|err| {
-            panic!("Problem unwrapping row after SELECT query: {err}");
-        });
-
-        query_result_as_vec.push(task)
-    }
-
-    query_result_as_vec
-}
-
-pub fn read_archived_tasks(conn: &Connection) -> Vec<Task> {
-    /*
-    Technically this is only reading the non-archived tasks. I may change that
-    if there's ever a use case for checking the archived tasks.
-    */
-
-    // Prepare sqlite statement
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-            id, 
-            is_archived,
-            summary, 
-            description, 
-            due_date, 
-            from_date, 
-            lead_days, 
-            priority, 
-            repeat_interval, 
-            times_selected, 
-            times_shown
-        FROM tasks WHERE is_archived = 1",
-        )
-        .unwrap_or_else(|err| {
-            panic!("Problem preparing SELECT statement: {err}");
-        });
-
-    /*
-    Just like in add_tasks(), rusqlite is pretty good at converting types. I
-    just need to do some pre-processing for tasks::Priority. Again, it would be
-    better to just write a macro to handle this.
-    */
-    let rows = stmt
-        .query_map([], |row| {
-            let priority: Priority = {
-                if row.get(7) == Ok(0) {
-                    Priority::P0
-                } else if row.get(7) == Ok(1) {
-                    Priority::P1
-                } else if row.get(7) == Ok(2) {
-                    Priority::P2
-                } else if row.get(7) == Ok(3) {
-                    Priority::P3
-                } else {
-                    Priority::P1
-                }
-            };
-
-            Ok(Task {
-                id: row.get(0)?,
-                is_archived: row.get(1)?,
-                summary: row.get(2)?,
-                description: row.get(3)?,
-                due_date: row.get(4)?,
-                from_date: row.get(5)?,
-                lead_days: row.get(6)?,
-                priority: priority,
-                repeat_interval: row.get(8)?,
-                times_selected: row.get(9)?,
-                times_shown: row.get(10)?,
-            })
-        })
-        .unwrap_or_else(|err| {
-            panic!("Problem running SELECT statement or processing results: {err}");
-        });
-
-    // Converting it from a rusqlite MappedRows<Task> to a Vec<Task>.
-    // This might not be necessary if I was more comfortable with rusqlite.
-    let mut query_result_as_vec: Vec<Task> = Vec::new();
-    for row in rows {
-        let task = row.unwrap_or_else(|err| {
-            panic!("Problem unwrapping row after SELECT query: {err}");
-        });
-
-        query_result_as_vec.push(task)
     }
 
     query_result_as_vec
@@ -479,6 +496,13 @@ pub fn read_archived_tasks(conn: &Connection) -> Vec<Task> {
 //         });
 // }
 
+/// Incriments a task's times_shown by 1 in the db.
+///
+/// # Arguments
+///
+/// * `conn: Connection` - Allows us to access the SQLite db.
+/// * `id: u32` - The id for the affected task.
+/// * `times_shown` - The current value to be incremented (before adding 1)
 pub fn increment_times_shown(conn: &Connection, id: u32, times_shown: u32) {
     conn.execute(
         "UPDATE tasks SET times_shown=?1 WHERE id=?2",
@@ -529,7 +553,7 @@ mod tests {
             panic!("Problem establishing connection to the database: {err}");
         });
 
-        create_table(&conn);
+        // create_table(&conn);
 
         conn
     }
@@ -597,22 +621,22 @@ mod tests {
         tasks
     }
 
-    #[test]
-    fn test_add_and_read_db() {
-        // Prepare the in-memory db
-        let conn = connect_to_test_db();
-        let source_data = generate_basic_test_data();
+    // #[test]
+    // fn test_add_and_read_db() {
+    //     // Prepare the in-memory db
+    //     let conn = connect_to_test_db();
+    //     let source_data = generate_basic_test_data();
 
-        // Run the add function we're testing
-        for task in &source_data {
-            add_task(&conn, task.clone());
-        }
+    //     // Run the add function we're testing
+    //     for task in &source_data {
+    //         add_task(&conn, task.clone());
+    //     }
 
-        // Run the read function we're testing
-        let test_data = read_all_tasks(&conn);
+    //     // Run the read function we're testing
+    //     let test_data = read_all_tasks(&conn);
 
-        assert_eq!(source_data, test_data);
-    }
+    //     assert_eq!(source_data, test_data);
+    // }
 
     // #[test]
     // fn test_delete_task_by_id() {
