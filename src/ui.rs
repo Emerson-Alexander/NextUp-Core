@@ -67,14 +67,6 @@ pub fn wait_for_interaction() {
 /// To change what displays before the state title, see `aux_info: String`.
 pub fn print_header(app_state: AppState) {
     let title = app_state.to_string();
-    // let title = match app_state {
-    //     AppState::AddTask => String::from("Add Task"),
-    //     AppState::EditTask => String::from("Edit Task"),
-    //     // TODO: MainLoop shouldn't need a Connection here.
-    //     AppState::MainLoop => String::from("Home"),
-    //     AppState::Shop => String::from("Shop"),
-    //     AppState::ToDo => String::from("ToDo"),
-    // };
 
     let aux_info = String::from("Backlist > ");
 
