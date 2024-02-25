@@ -118,6 +118,13 @@ fn add_task(conn: &Connection) {
     db::add_task(conn, task)
 }
 
+/// Shows the user their current funds and allows them to enter a custom
+/// transaction.
+///
+/// # Arguments
+///
+/// * `conn: &Connection` - `ui::display_funds()` requires a &Connection, so
+/// it's required here too.
 fn shop(conn: &Connection) {
     ui::print_header(AppState::Shop);
     ui::display_funds(finance::calc_funds(conn));

@@ -371,11 +371,23 @@ You have selected:
 //     );
 // }
 
+/// Displays the funds out to 2 decimal places, includes a line of context.
+///
+/// # Arguments
+///
+/// * `funds: f64` - The funds to be displayed.
 pub fn display_funds(funds: f64) {
     // Only displays funds to 2 decimal places
     println!("\nYou have ${:.2} remaining", funds);
 }
 
+/// Prompts the user to input a transaction amount. Calls `db::add_transaction()`
+/// if a vaild input is found.
+///
+/// # Arguments
+///
+/// * `conn: &Connection` - A conncetion to the db. `db::add_transaction()` requires
+/// it, so it's required here too.
 pub fn request_transaction(conn: &Connection) {
     println!("\nHow much would you like to spend?");
 
