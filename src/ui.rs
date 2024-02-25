@@ -100,7 +100,7 @@ pub fn print_header(app_state: AppState) {
 ///
 /// Will inform the user and retry if the user attempts to select a bad input.
 pub fn select_app_state(states: &[AppState]) -> AppState {
-    // We loop to retry bad inputs
+    // We loop to retry invalid inputs
     loop {
         println!(
             "
