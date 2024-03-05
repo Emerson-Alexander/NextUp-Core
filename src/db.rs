@@ -158,7 +158,8 @@ fn init_transactions(conn: &Connection) {
     });
 }
 
-/// If necessary, create the settings table.
+/// If necessary, create the settings table. Then, add the default settings if
+/// they don't already exist.
 ///
 /// # Arguments
 ///
@@ -166,20 +167,42 @@ fn init_transactions(conn: &Connection) {
 ///
 /// # Panics
 ///
-/// May panic if there are issues executing the command. I believe this would
+/// - May panic if there are issues executing the command. I believe this would
 /// only occur if there is an issue with `conn`.
+/// - May panic if there is an issue inserting the default settings.
+///
+/// # Note
+///
+/// This table is acting as a simple key-value noSQL database.
 fn init_settings(conn: &Connection) {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS settings (
             id INTEGER PRIMARY KEY,
-            target_allowance INTEGER NOT NULL,
-            max_allowance INTEGER NOT NULL
+            key TEXT NOT NULL,
+            value TEXT NOT NULL
         )",
         (),
     )
     .unwrap_or_else(|err| {
         panic!("Problem accessing settings table: {err}");
     });
+
+    if is_table_empty("settings", conn) {
+        let default_settings = vec![
+            ("maximum_monthly_allowance", 600),
+            ("target_monthly_allowance", 400),
+        ];
+
+        for (key, value) in default_settings {
+            conn.execute(
+                "INSERT INTO settings (id, key, value) VALUES (?, ?, ?)",
+                params![None::<i64>, key, value],
+            )
+            .unwrap_or_else(|err| {
+                panic!("Problem inserting default data into settings table: {err}");
+            });
+        }
+    }
 }
 
 /// If necessary, create the statistics table. Then, add the default statistics
@@ -194,12 +217,16 @@ fn init_settings(conn: &Connection) {
 /// - May panic if there are issues executing the command. I believe this would
 /// only occur if there is an issue with `conn`.
 /// - May panic if there is an issue inserting the default statistics.
+///
+/// # Note
+///
+/// This table is acting as a simple key-value noSQL database.
 fn init_statistics(conn: &Connection) {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS statistics (
             id INTEGER PRIMARY KEY,
             key TEXT NOT NULL,
-            value REAL
+            value TEXT
         )",
         (),
     )
@@ -209,11 +236,11 @@ fn init_statistics(conn: &Connection) {
 
     if is_table_empty("statistics", conn) {
         let default_statistics = vec![
-            ("funds_unlocked", Some(0.0)),
-            ("funds_loaded", Some(400.0)),
-            ("average_completion_seconds", Some(600.0)),
+            ("funds_unlocked", Some(0)),
+            ("funds_loaded", Some(400)),
+            ("average_completion_seconds", Some(600)),
             ("baseline_bounty", None),
-            ("total_tasks_completed", Some(0.0)),
+            ("total_tasks_completed", Some(0)),
         ];
 
         for (key, value) in default_statistics {
