@@ -300,12 +300,12 @@ What type of task is this?
 
     Task {
         id: 0,
-        parent_id: unimplemented!(),
+        parent_id: 1, // TODO: Allow the user to set this manually.
         is_archived: false,
         summary,
         description,
-        average_duration: unimplemented!(),
-        bounty_modifier: unimplemented!(),
+        average_duration: None,
+        bounty_modifier: 0.0,
         due_date,
         from_date: <Utc>::now(),
         lead_days,

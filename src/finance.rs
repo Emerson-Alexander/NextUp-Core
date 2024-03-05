@@ -51,10 +51,15 @@ fn base_value(conn: &Connection) -> f64 {
     // Determine how many tasks will be completed each month and how much the
     // user hopes to add to their budget.
     let monthly_tasks = calc_monthly_tasks(conn);
-    let target_allowance = db::read_settings(conn)[0];
+    // let target_allowance = db::read_settings(conn)[0];
+    let target_allowance: f64;
+    match db::read_target_allowance(conn) {
+        Ok(n) => target_allowance = n as f64,
+        Err(e) => panic!("Error reading target allowance: {e}"),
+    }
 
     // Divide the factors
-    let result: f64 = (target_allowance as f64) / (monthly_tasks as f64);
+    let result: f64 = target_allowance / (monthly_tasks as f64);
 
     // Round the result to 2 decimal places
     let base_value = (result * 100.0).round() / 100.0;

@@ -1,6 +1,8 @@
+use core::panic;
+
 use super::tasks::{Priority, Task};
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::{params, Connection, Statement};
+use rusqlite::{params, Connection, Error, OptionalExtension, Statement};
 
 /// Establishes connection to the SQLite db.
 ///
@@ -13,8 +15,6 @@ use rusqlite::{params, Connection, Statement};
 /// May painc if it is unable to establish a connection. This will **not** occur if
 /// the file does not exist. In such case, the file will be created.
 pub fn connect_to_db() -> Connection {
-    // TODO: Remove duplicate path... testing
-    // const DB_PATH: &str = "backlist.db";
     const DB_PATH: &str = "upNext.db";
 
     let conn = match Connection::open(DB_PATH) {
@@ -359,9 +359,12 @@ pub fn read_active_tasks(conn: &Connection) -> Vec<Task> {
         .prepare(
             "SELECT
             id, 
+            parent_id,
             is_archived,
             summary, 
-            description, 
+            description,
+            average_duration,
+            bounty_modifier, 
             due_date, 
             from_date, 
             lead_days, 
@@ -393,9 +396,12 @@ pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
         .prepare(
             "SELECT
             id, 
+            parent_id,
             is_archived,
             summary, 
             description, 
+            average_duration,
+            bounty_modifier,
             due_date, 
             from_date, 
             lead_days, 
@@ -427,9 +433,12 @@ pub fn read_archived_tasks(conn: &Connection) -> Vec<Task> {
         .prepare(
             "SELECT
             id, 
+            parent_id,
             is_archived,
             summary, 
             description, 
+            average_duration,
+            bounty_modifier,
             due_date, 
             from_date, 
             lead_days, 
@@ -547,14 +556,20 @@ pub fn read_archived_tasks(conn: &Connection) -> Vec<Task> {
 fn tasks_from_stmt(mut stmt: Statement<'_>, include_inactive: bool) -> Vec<Task> {
     let rows = stmt
         .query_map([], |row| {
+            let average_duration = match row.get(5) {
+                Ok(Some(d)) => Some(Duration::seconds(d)),
+                Ok(None) => None,
+                Err(_) => None,
+            };
+
             let priority: Priority = {
-                if row.get(7) == Ok(0) {
+                if row.get(10) == Ok(0) {
                     Priority::P0
-                } else if row.get(7) == Ok(1) {
+                } else if row.get(10) == Ok(1) {
                     Priority::P1
-                } else if row.get(7) == Ok(2) {
+                } else if row.get(10) == Ok(2) {
                     Priority::P2
-                } else if row.get(7) == Ok(3) {
+                } else if row.get(10) == Ok(3) {
                     Priority::P3
                 } else {
                     Priority::P1
@@ -563,19 +578,19 @@ fn tasks_from_stmt(mut stmt: Statement<'_>, include_inactive: bool) -> Vec<Task>
 
             Ok(Task {
                 id: row.get(0)?,
-                is_archived: row.get(1)?,
-                summary: row.get(2)?,
-                description: row.get(3)?,
-                due_date: row.get(4)?,
-                from_date: row.get(5)?,
-                lead_days: row.get(6)?,
+                parent_id: row.get(1)?,
+                is_archived: row.get(2)?,
+                summary: row.get(3)?,
+                description: row.get(4)?,
+                average_duration: average_duration,
+                bounty_modifier: row.get(6)?,
+                due_date: row.get(7)?,
+                from_date: row.get(8)?,
+                lead_days: row.get(9)?,
                 priority: priority,
-                repeat_interval: row.get(8)?,
-                times_selected: row.get(9)?,
-                times_shown: row.get(10)?,
-                parent_id: unimplemented!(),
-                average_duration: unimplemented!(),
-                bounty_modifier: unimplemented!(),
+                repeat_interval: row.get(11)?,
+                times_selected: row.get(12)?,
+                times_shown: row.get(13)?,
             })
         })
         .unwrap_or_else(|err| {
@@ -602,31 +617,20 @@ fn tasks_from_stmt(mut stmt: Statement<'_>, include_inactive: bool) -> Vec<Task>
     query_result_as_vec
 }
 
-/// This is a temporary function. I intend to replace the settings table with a
-/// settings.txt.
-pub fn read_settings(conn: &Connection) -> [u32; 2] {
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-            target_allowance,
-            max_allowance
-        FROM settings",
-        )
-        .unwrap_or_else(|err| {
-            panic!("Problem preparing SELECT statement: {err}");
-        });
+/// TODO: Doc comment. I got it working, I need to take a break.
+pub fn read_target_allowance(conn: &Connection) -> Result<u32, Error> {
+    let sql = "SELECT value FROM settings WHERE key = ?1";
 
-    let result_iter = stmt
-        .query_map([], |row| Ok([row.get(0).unwrap(), row.get(1).unwrap()]))
-        .unwrap();
+    let value: Option<String> = conn
+        .query_row(sql, ["target_monthly_allowance"], |row| row.get(0))
+        .optional()?;
 
-    let mut settings: [u32; 2] = [0, 0];
-
-    for result in result_iter {
-        settings = result.unwrap();
+    match value {
+        Some(v) => v
+            .parse::<u32>()
+            .map_err(|_| Error::InvalidColumnName(String::from("Failed to parse TEXT to u32"))),
+        None => Err(Error::QueryReturnedNoRows),
     }
-
-    settings
 }
 
 pub fn read_transactions(conn: &Connection) -> Vec<(DateTime<Utc>, Option<f64>, Option<f64>)> {
