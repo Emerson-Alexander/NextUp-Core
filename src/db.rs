@@ -355,7 +355,7 @@ pub fn add_transaction(conn: &Connection, price: f64) {
 /// within their repeat_interval.
 pub fn read_active_tasks(conn: &Connection) -> Vec<Task> {
     // Prepare sqlite statement
-    let mut stmt = conn
+    let stmt = conn
         .prepare(
             "SELECT
             id, 
@@ -392,7 +392,7 @@ pub fn read_active_tasks(conn: &Connection) -> Vec<Task> {
 /// A `Vec<Task>` of all tasks.
 pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
     // Prepare sqlite statement
-    let mut stmt = conn
+    let stmt = conn
         .prepare(
             "SELECT
             id, 
@@ -418,42 +418,43 @@ pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
     return tasks_from_stmt(stmt, true);
 }
 
-/// Reads all archived tasks from the db into memory.
-///
-/// # Arguments
-///
-/// * `conn: Connection` - Allows us to access the SQLite db.
-///
-/// # Returns
-///
-/// A `Vec<Task>` of all tasks that are archived.
-pub fn read_archived_tasks(conn: &Connection) -> Vec<Task> {
-    // Prepare sqlite statement
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-            id, 
-            parent_id,
-            is_archived,
-            summary, 
-            description, 
-            average_duration,
-            bounty_modifier,
-            due_date, 
-            from_date, 
-            lead_days, 
-            priority, 
-            repeat_interval, 
-            times_selected, 
-            times_shown
-        FROM tasks WHERE is_archived = 1",
-        )
-        .unwrap_or_else(|err| {
-            panic!("Problem preparing SELECT statement: {err}");
-        });
+// /// Reads all archived tasks from the db into memory.
+// ///
+// /// # Arguments
+// ///
+// /// * `conn: Connection` - Allows us to access the SQLite db.
+// ///
+// /// # Returns
+// ///
+// /// A `Vec<Task>` of all tasks that are archived.
+// pub fn read_archived_tasks(conn: &Connection) -> Vec<Task> {
+//     // Prepare sqlite statement
+//     let stmt = conn
+//         .prepare(
+//             "SELECT
+//             id,
+//             parent_id,
+//             is_archived,
+//             summary,
+//             description,
+//             average_duration,
+//             bounty_modifier,
+//             due_date,
+//             from_date,
+//             lead_days,
+//             priority,
+//             repeat_interval,
+//             times_selected,
+//             times_shown
+//         FROM tasks WHERE is_archived = 1",
+//         )
+//         .unwrap_or_else(|err| {
+//             panic!("Problem preparing SELECT statement: {err}");
+//         });
 
-    return tasks_from_stmt(stmt, true);
-}
+//     return tasks_from_stmt(stmt, true);
+// }
+
 // pub fn read_active_tasks(conn: &Connection) -> Vec<Task> {
 //     // Prepare sqlite statement
 //     let mut stmt = conn

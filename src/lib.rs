@@ -17,7 +17,7 @@ enum AppState {
     /// Walks the user through adding a new task to the tasks table.
     AddTask,
     /// Allows the user to edit a specific task.
-    EditTask,
+    _EditTask,
     /// Loops AppState::SelectAppState(). May add more functionality later.
     MainLoop,
     /// Where user can make adjustments to their funds.
@@ -34,7 +34,7 @@ impl ToString for AppState {
     fn to_string(&self) -> &'static str {
         match self {
             AppState::AddTask => "Add Task",
-            AppState::EditTask => "Edit Task",
+            AppState::_EditTask => "Edit Task",
             AppState::MainLoop => "Home",
             AppState::Shop => "Shop",
             AppState::ToDo => "ToDo",
@@ -56,7 +56,7 @@ fn assume_state(state: AppState, conn: Option<&Connection>) {
 
     match state {
         AppState::AddTask => add_task(conn.expect(&db_lost)),
-        AppState::EditTask => unimplemented!(),
+        AppState::_EditTask => unimplemented!(),
         AppState::MainLoop => main_loop(conn.expect(&db_lost)),
         AppState::Shop => shop(conn.expect(&db_lost)),
         AppState::ToDo => to_do(conn.expect(&db_lost)),

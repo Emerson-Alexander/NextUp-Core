@@ -6,7 +6,7 @@
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
 
-use crate::{db, finance, tasks::Task, ToString};
+use crate::{db, tasks::Task, ToString};
 
 use super::{AppState, Priority};
 // use super::{Action, AppState, Priority};

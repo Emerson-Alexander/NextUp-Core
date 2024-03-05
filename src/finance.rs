@@ -1,7 +1,7 @@
 use crate::db;
 use crate::tasks::Task;
 use chrono::{Duration, Utc};
-use rusqlite::{Connection, Transaction};
+use rusqlite::Connection;
 
 /// Determines the average number of tasks the user can expect to complete in a
 /// month.
@@ -70,16 +70,16 @@ fn base_value(conn: &Connection) -> f64 {
 /// Will eventually calculate an individual payout for each task based on the
 /// number of times shown vs times selected. For now it just passes through the
 /// base_value of all tasks.
-pub fn adjusted_value(conn: &Connection, task: &Task) -> f64 {
+pub fn adjusted_value(conn: &Connection, _task: &Task) -> f64 {
     // This whole function is TODO
     base_value(conn)
 }
 
-pub fn payout(conn: &Connection, task: &Task) {
-    let bounty = adjusted_value(conn, task);
+// pub fn payout(conn: &Connection, task: &Task) {
+//     let bounty = adjusted_value(conn, task);
 
-    db::add_transaction(conn, bounty as f64);
-}
+//     db::add_transaction(conn, bounty as f64);
+// }
 
 pub fn calc_funds(conn: &Connection) -> f64 {
     let transactions = db::read_transactions(conn);
