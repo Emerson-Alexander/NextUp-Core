@@ -54,13 +54,13 @@ pub fn wait_for_interaction() {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// print_header(AppState::Shop)
 /// // Should print:
 /// // ===================
 /// //   Backlist > Shop
 /// // ===================
-/// ```
+/// ````
 ///
 /// # Notes
 ///
@@ -300,9 +300,12 @@ What type of task is this?
 
     Task {
         id: 0,
+        parent_id: unimplemented!(),
         is_archived: false,
         summary,
         description,
+        average_duration: unimplemented!(),
+        bounty_modifier: unimplemented!(),
         due_date,
         from_date: <Utc>::now(),
         lead_days,
