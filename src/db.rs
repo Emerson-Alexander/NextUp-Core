@@ -343,19 +343,6 @@ pub fn add_transaction(conn: &Connection, price: f64) {
     }
 }
 
-pub fn default_settings(conn: &Connection) {
-    conn.execute(
-        "INSERT INTO settings (
-                target_allowance,
-                max_allowance
-            ) VALUES (?, ?)",
-        params![400.0, 500.0],
-    )
-    .unwrap_or_else(|err| {
-        panic!("Problem adding task to table: {err}");
-    });
-}
-
 /// Reads all active tasks from the db into memory.
 ///
 /// # Arguments
