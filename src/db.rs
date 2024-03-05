@@ -15,7 +15,7 @@ use rusqlite::{params, Connection, Statement};
 pub fn connect_to_db() -> Connection {
     // TODO: Remove duplicate path... testing
     // const DB_PATH: &str = "backlist.db";
-    const DB_PATH: &str = "nextUp.db";
+    const DB_PATH: &str = "upNext.db";
 
     let conn = match Connection::open(DB_PATH) {
         Ok(file) => file,
@@ -40,6 +40,20 @@ pub fn init_tables(conn: &Connection) {
     init_folders(conn);
     init_transactions(conn);
     init_settings(conn);
+    init_statistics(conn);
+}
+
+fn is_table_empty(table_name: &str, conn: &Connection) -> bool {
+    let mut stmt = conn
+        .prepare(&(String::from("SELECT COUNT(*) FROM ") + table_name))
+        .unwrap();
+    let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap();
+
+    if count == 0 {
+        true
+    } else {
+        false
+    }
 }
 
 /// If necessary, create the tasks table.
@@ -98,6 +112,8 @@ fn init_folders(conn: &Connection) {
             id INTEGER PRIMARY KEY,
             parent_id INTEGER,
             name TEXT NOT NULL,
+            style TEXT NOT NULL,
+            status INTEGER,
             FOREIGN KEY (parent_id) REFERENCES folders(id)
         )",
         (),
@@ -106,15 +122,10 @@ fn init_folders(conn: &Connection) {
         panic!("Problem accessing folders table: {err}");
     });
 
-    // Check if the table is empty
-    let mut stmt = conn.prepare("SELECT COUNT(*) FROM folders").unwrap();
-    let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap();
-
-    // If empty, insert the default top-level folder
-    if count == 0 {
+    if is_table_empty("folders", conn) {
         conn.execute(
-            "INSERT INTO folders (parent_id, name) VALUES (?, ?)",
-            params![None::<i64>, DEFAULT_FOLDER_NAME],
+            "INSERT INTO folders (parent_id, name, style) VALUES (?, ?, ?)",
+            params![None::<i64>, DEFAULT_FOLDER_NAME, "directory"],
         )
         .unwrap_or_else(|err| {
             panic!("Problem inserting placeholder into folders table: {err}");
@@ -169,6 +180,52 @@ fn init_settings(conn: &Connection) {
     .unwrap_or_else(|err| {
         panic!("Problem accessing settings table: {err}");
     });
+}
+
+/// If necessary, create the statistics table. Then, add the default statistics
+/// if they don't already exist.
+///
+/// # Arguments
+///
+/// * `conn: Connection` - Allows us to access the SQLite db.
+///
+/// # Panics
+///
+/// - May panic if there are issues executing the command. I believe this would
+/// only occur if there is an issue with `conn`.
+/// - May panic if there is an issue inserting the default statistics.
+fn init_statistics(conn: &Connection) {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS statistics (
+            id INTEGER PRIMARY KEY,
+            key TEXT NOT NULL,
+            value REAL
+        )",
+        (),
+    )
+    .unwrap_or_else(|err| {
+        panic!("Problem accessing folders table: {err}");
+    });
+
+    if is_table_empty("statistics", conn) {
+        let default_statistics = vec![
+            ("funds_unlocked", Some(0.0)),
+            ("funds_loaded", Some(400.0)),
+            ("average_completion_seconds", Some(600.0)),
+            ("baseline_bounty", None),
+            ("total_tasks_completed", Some(0.0)),
+        ];
+
+        for (key, value) in default_statistics {
+            conn.execute(
+                "INSERT INTO statistics (id, key, value) VALUES (?, ?, ?)",
+                params![None::<i64>, key, value],
+            )
+            .unwrap_or_else(|err| {
+                panic!("Problem inserting default data into statistics table: {err}");
+            });
+        }
+    }
 }
 
 /// Add a Task to the tasks table.
