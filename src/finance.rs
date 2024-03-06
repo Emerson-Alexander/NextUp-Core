@@ -1,7 +1,7 @@
 use crate::db;
 use crate::tasks::Task;
 use chrono::{Duration, Utc};
-use rusqlite::{Connection, Transaction};
+use rusqlite::Connection;
 
 /// Determines the average number of tasks the user can expect to complete in a
 /// month.
@@ -51,10 +51,15 @@ fn base_value(conn: &Connection) -> f64 {
     // Determine how many tasks will be completed each month and how much the
     // user hopes to add to their budget.
     let monthly_tasks = calc_monthly_tasks(conn);
-    let target_allowance = db::read_settings(conn)[0];
+    // let target_allowance = db::read_settings(conn)[0];
+    let target_allowance: f64;
+    match db::read_target_allowance(conn) {
+        Ok(n) => target_allowance = n as f64,
+        Err(e) => panic!("Error reading target allowance: {e}"),
+    }
 
     // Divide the factors
-    let result: f64 = (target_allowance as f64) / (monthly_tasks as f64);
+    let result: f64 = target_allowance / (monthly_tasks as f64);
 
     // Round the result to 2 decimal places
     let base_value = (result * 100.0).round() / 100.0;
@@ -65,16 +70,16 @@ fn base_value(conn: &Connection) -> f64 {
 /// Will eventually calculate an individual payout for each task based on the
 /// number of times shown vs times selected. For now it just passes through the
 /// base_value of all tasks.
-pub fn adjusted_value(conn: &Connection, task: &Task) -> f64 {
+pub fn adjusted_value(conn: &Connection, _task: &Task) -> f64 {
     // This whole function is TODO
     base_value(conn)
 }
 
-pub fn payout(conn: &Connection, task: &Task) {
-    let bounty = adjusted_value(conn, task);
+// pub fn payout(conn: &Connection, task: &Task) {
+//     let bounty = adjusted_value(conn, task);
 
-    db::add_transaction(conn, bounty as f64);
-}
+//     db::add_transaction(conn, bounty as f64);
+// }
 
 pub fn calc_funds(conn: &Connection) -> f64 {
     let transactions = db::read_transactions(conn);
