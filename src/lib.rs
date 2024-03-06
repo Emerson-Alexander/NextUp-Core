@@ -1,5 +1,6 @@
 mod db;
 mod finance;
+mod folders;
 mod tasks;
 mod ui;
 mod weighting;
@@ -14,6 +15,8 @@ use crate::{
 /// Enumerates the possible states that the application can be in.
 #[derive(Clone)]
 enum AppState {
+    /// Walks the user through adding a new folder to the folders table.
+    AddFolder,
     /// Walks the user through adding a new task to the tasks table.
     AddTask,
     /// Allows the user to edit a specific task.
@@ -33,6 +36,7 @@ trait ToString {
 impl ToString for AppState {
     fn to_string(&self) -> &'static str {
         match self {
+            AppState::AddFolder => "Add Folder",
             AppState::AddTask => "Add Task",
             AppState::_EditTask => "Edit Task",
             AppState::MainLoop => "Home",
@@ -55,6 +59,7 @@ fn assume_state(state: AppState, conn: Option<&Connection>) {
         String::from("Value was None, but expected Some(&Connection).\nLost connection to db.");
 
     match state {
+        AppState::AddFolder => add_folder(conn.expect(&db_lost)),
         AppState::AddTask => add_task(conn.expect(&db_lost)),
         AppState::_EditTask => unimplemented!(),
         AppState::MainLoop => main_loop(conn.expect(&db_lost)),
@@ -104,18 +109,39 @@ fn main_loop(conn: &Connection) {
         ui::print_header(AppState::MainLoop);
 
         assume_state(
-            ui::select_app_state(&[AppState::ToDo, AppState::Shop, AppState::AddTask]),
+            ui::select_app_state(&[
+                AppState::ToDo,
+                AppState::Shop,
+                AppState::AddTask,
+                AppState::AddFolder,
+            ]),
             Some(conn),
         );
+    }
+}
+
+fn add_folder(conn: &Connection) {
+    ui::print_header(AppState::AddFolder);
+
+    let folder = ui::request_folder_input(conn);
+
+    match folder {
+        Ok(f) => db::add_folder(conn, &f).unwrap_or_else(|err| {
+            eprintln!("Problem adding folder to db: {}", err);
+        }),
+        Err(e) => eprintln!("Problem building folder: {}", e),
     }
 }
 
 fn add_task(conn: &Connection) {
     ui::print_header(AppState::AddTask);
 
-    let task = ui::request_task_input();
+    let task = ui::request_task_input(conn);
 
-    db::add_task(conn, task)
+    match task {
+        Ok(t) => db::add_task(conn, t),
+        Err(e) => eprintln!("Problem adding task: {}", e),
+    }
 }
 
 /// Shows the user their current funds and allows them to enter a custom

@@ -6,11 +6,13 @@
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
 
+use crate::folders::{Folder, Style};
 use crate::{db, tasks::Task, ToString};
 
 use super::{AppState, Priority};
 // use super::{Action, AppState, Priority};
 
+use std::error::Error;
 use std::io;
 
 /// Print the Backlist logo to terminal.
@@ -186,134 +188,280 @@ Select a task to complete.\n"
     }
 }
 
-pub fn request_task_input() -> Task {
-    println!("\nEnter task summary\n");
+/// Reads a line of text from stdin after displaying a prompt, trims the input, and returns it.
+///
+/// # Arguments
+///
+/// * `prompt: &str` - A string slice that holds the prompt message displayed to the user.
+///
+/// # Returns
+///
+/// * `Result<String, io::Error>` which is Ok containing the trimmed string if read successfully, or an Err otherwise.
+fn read_trimmed_line(prompt: &str) -> Result<String, io::Error> {
+    println!("{}", prompt);
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_string())
+}
 
-    let mut summary_io = String::new();
+/// Requests and returns the parent_id from the user.
+///
+/// # Arguments
+///
+/// * `conn: &Connection` - A conncetion to the db. `db::read_all_folders()` requires
+/// it, so it's required here too.
+///
+/// # Returns
+///
+/// * `Result<u32, io::Error>` containing the parent_id if successfully read, or an Err otherwise.
+fn request_parent_id(conn: &Connection) -> Result<u32, io::Error> {
+    loop {
+        let hm = db::read_all_folders(conn, None, "".to_string()).unwrap();
 
-    io::stdin()
-        .read_line(&mut summary_io)
-        .expect("Failed to read line");
+        // Collect HashMap entries into a vector
+        let mut entries: Vec<(_, _)> = hm.into_iter().collect();
 
-    let summary = summary_io.trim().to_string();
+        // Sort the vector by value alphabetically
+        entries.sort_by_key(|entry| entry.1.clone());
 
-    println!("\nEnter description (or hit <ENTER> to leave blank)\n");
+        // Print sorted results
+        for (i, (_, value)) in entries.iter().enumerate() {
+            println!("{}. {}", i + 1, value);
+        }
 
-    let mut description_io = String::new();
+        let selection = read_trimmed_line("\nSelect a folder.\n")?;
+        // TODO: Error handling for unwrap()
 
-    io::stdin()
-        .read_line(&mut description_io)
-        .expect("Failed to read line");
-
-    let mut description: Option<String> = None;
-
-    println!("len is {}", description_io.len());
-
-    if description_io.len() > 1 {
-        description = Some(description_io.trim().to_string());
+        match selection.parse::<usize>() {
+            Ok(n) => {
+                if n >= 1 && n <= entries.len() {
+                    let (real_id, _) = entries[n - 1];
+                    return Ok(real_id);
+                } else {
+                    println!("Invalid input!")
+                }
+            }
+            Err(_) => println!("Invalid input!"),
+        }
     }
+}
 
-    println!(
-        "
-Enter priority (or hit <ENTER> to use default)
+/// Requests and returns the task summary from the user.
+///
+/// # Returns
+///
+/// * `Result<String, io::Error>` containing the task summary if successfully read, or an Err otherwise.
+fn request_task_summary() -> Result<String, io::Error> {
+    loop {
+        let summary = read_trimmed_line("\nEnter task summary\n")?;
 
-0. Deprioritized
-1. Default
-2. High Priority
-3. Top Priority\n"
-    );
+        if !summary.is_empty() {
+            return Ok(summary);
+        } else {
+            println!("The task's summary cannot be empty!")
+        }
+    }
+}
 
-    let mut priority_io = String::new();
+/// Requests an optional description from the user. Returns None if the user enters an empty string.
+///
+/// # Returns
+///
+/// * `Result<Option<String>, io::Error>` containing the task description if provided, or None if left blank.
+fn request_optional_description() -> Result<Option<String>, io::Error> {
+    let description = read_trimmed_line("\nEnter description (or hit <ENTER> to leave blank)\n")?;
+    if description.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(description))
+    }
+}
 
-    io::stdin()
-        .read_line(&mut priority_io)
-        .expect("Failed to read line");
+/// Requests the priority of the task from the user and converts it to a `Priority` enum.
+///
+/// # Returns
+///
+/// * `Result<Priority, Box<dyn Error>>` which is Ok containing the priority if successfully parsed, or an Err otherwise.
+fn request_priority() -> Result<Priority, Box<dyn Error>> {
+    loop {
+        let input = read_trimmed_line(
+            "\nEnter priority\n0. Deprioritized\n1. Default\n2. High Priority\n3. Top Priority\n",
+        )?;
+        match input.parse::<usize>() {
+            Ok(0) => return Ok(Priority::P0),
+            Ok(1) => return Ok(Priority::P1),
+            Ok(2) => return Ok(Priority::P2),
+            Ok(3) => return Ok(Priority::P3),
+            Ok(_) | Err(_) => println!("Invalid input!"),
+        }
+    }
+}
 
-    let priority: Priority = match priority_io.trim().parse() {
-        Ok(0) => Priority::P0,
-        Ok(1) => Priority::P1,
-        Ok(2) => Priority::P2,
-        Ok(3) => Priority::P3,
-        _ => Priority::P1,
+/// Requests the type of task from the user, ensuring only valid options (1, 2, or 3) are accepted.
+/// Reprompts the user until a valid option is entered.
+///
+/// # Returns
+///
+/// * `Result<u32, Box<dyn Error>>` which is Ok containing the task type if successfully parsed, or an Err otherwise.
+fn request_task_type() -> Result<u32, Box<dyn Error>> {
+    loop {
+        let input = read_trimmed_line(
+            "\nWhat type of task is this?\n1. One Time\n2. Recurring\n3. Hard Deadline\n",
+        )?;
+        match input.parse::<u32>() {
+            Ok(1) | Ok(2) | Ok(3) => return Ok(input.parse().unwrap()),
+            _ => println!("Invalid input!"),
+        }
+    }
+}
+
+/// Requests the interval for recurring tasks from the user, ensuring that only positive integers are accepted.
+///
+/// # Returns
+///
+/// * `Result<Option<u32>, Box<dyn Error>>` which is Ok containing the interval in days if a valid input is provided.
+fn request_recurring_details() -> Result<Option<u32>, Box<dyn Error>> {
+    loop {
+        let input = read_trimmed_line("\nHow many days would you like between recurrences?\n")?;
+        match input.parse::<u32>() {
+            Ok(num) if num > 0 => return Ok(Some(num)),
+            _ => println!("Invalid input!"),
+        }
+    }
+}
+
+/// Requests deadline details for tasks with a hard deadline, ensuring that the provided values are valid.
+///
+/// # Returns
+///
+/// * `Result<(Option<DateTime<Utc>>, Option<u32>), Box<dyn Error>>` containing the due date and lead days if valid inputs are provided, or None for each if not applicable.
+fn request_deadline_details() -> Result<(Option<DateTime<Utc>>, Option<u32>), Box<dyn Error>> {
+    let days_until_deadline = loop {
+        let input = read_trimmed_line("\nHow many days until the deadline?\n")?;
+        match input.parse::<i64>() {
+            Ok(num) if num >= 0 => break num, // Ensuring positive value
+            _ => println!("Invalid input. Please enter a non-negative number of days."),
+        }
+    };
+    // TODO: This should be set to last midnight + duration
+    let due_date = Utc::now() + Duration::days(days_until_deadline);
+
+    let lead_days = loop {
+        let input =
+            read_trimmed_line("\nHow many days before the deadline would you like to start?\n")?;
+        match input.parse::<u32>() {
+            Ok(num) if num > 0 => break num, // Ensuring positive value
+            _ => println!("Invalid input. Please enter a positive number of days."),
+        }
     };
 
-    println!(
-        "
-What type of task is this?
+    Ok((Some(due_date), Some(lead_days)))
+}
 
-1. One Time
-2. Recurring
-3. Hard Deadline\n"
-    );
+/// Constructs a `Task` object based on user input. Prompts the user for various task details,
+/// including summary, description, priority, and type. Depending on the task type, additional
+/// information such as recurrence interval or deadline details may also be requested.
+///
+/// # Arguments
+///
+/// * `conn: &Connection` - A conncetion to the db. `db::read_all_folders()` requires
+/// it, so it's required here too.
+///
+/// # Returns
+///
+/// * `Result<Task, Box<dyn Error>>` which is Ok containing the constructed Task object if all inputs are successfully gathered and parsed, or an Err otherwise.
+pub fn request_task_input(conn: &Connection) -> Result<Task, Box<dyn Error>> {
+    let patent_id = request_parent_id(conn)?;
+    let summary = request_task_summary()?;
+    let description = request_optional_description()?;
+    let priority = request_priority()?;
+    let task_type = request_task_type()?;
 
-    let mut task_type = String::new();
-
-    io::stdin()
-        .read_line(&mut task_type)
-        .expect("Failed to read line");
-
-    let mut repeat_interval_io = String::new();
     let mut repeat_interval: Option<u32> = None;
-    let mut due_date_io = String::new();
     let mut due_date: Option<DateTime<Utc>> = None;
-    let mut lead_days_io = String::new();
     let mut lead_days: Option<u32> = None;
 
-    match task_type.trim().parse() {
-        Ok(2) => {
-            println!("\nHow many days would you like between recurrences?\n");
-
-            io::stdin()
-                .read_line(&mut repeat_interval_io)
-                .expect("Failed to read line");
-
-            repeat_interval = match repeat_interval_io.trim().parse() {
-                Ok(num) => Some(num),
-                _ => None,
-            };
+    match task_type {
+        2 => repeat_interval = request_recurring_details()?,
+        3 => {
+            let details = request_deadline_details()?;
+            due_date = details.0;
+            lead_days = details.1;
         }
-        Ok(3) => {
-            println!("\nHow many days until the deadline?\n");
+        _ => {}
+    }
 
-            io::stdin()
-                .read_line(&mut due_date_io)
-                .expect("Failed to read line");
-
-            due_date = match due_date_io.trim().parse() {
-                Ok(num) => Some(<Utc>::now() + Duration::days(num)),
-                _ => None,
-            };
-
-            println!("\nHow many days before the deadline would you like to start?\n");
-
-            io::stdin()
-                .read_line(&mut lead_days_io)
-                .expect("Failed to read line");
-
-            lead_days = match lead_days_io.trim().parse() {
-                Ok(num) => Some(num),
-                _ => None,
-            };
-        }
-        _ => (),
-    };
-
-    Task {
-        id: 0,
-        parent_id: 1, // TODO: Allow the user to set this manually.
+    Ok(Task {
+        id: 0, // This value is ignored
+        parent_id: patent_id,
         is_archived: false,
         summary,
         description,
         average_duration: None,
         bounty_modifier: 0.0,
         due_date,
-        from_date: <Utc>::now(),
+        from_date: Utc::now(), // TODO: Set to last midnight
         lead_days,
         priority,
         repeat_interval,
         times_selected: 0,
         times_shown: 0,
+    })
+}
+
+/// Requests and returns the folder name from the user.
+///
+/// # Returns
+///
+/// * `Result<String, io::Error>` containing the folder name if successfully read, or an Err otherwise.
+fn request_folder_name() -> Result<String, io::Error> {
+    loop {
+        let name = read_trimmed_line("\nEnter folder name\n")?;
+
+        if !name.is_empty() {
+            return Ok(name);
+        } else {
+            println!("The folder's name cannot be empty!")
+        }
     }
+}
+
+/// Requests the style of the folder from the user and converts it to a `Style` enum.
+///
+/// # Returns
+///
+/// * `Result<Style, Box<dyn Error>>` which is Ok containing the style if successfully parsed, or an Err otherwise.
+fn request_style() -> Result<Style, Box<dyn Error>> {
+    loop {
+        let input =
+            read_trimmed_line("\nEnter folder type\n1. Directory\n2. Selector\n3. Iterator\n")?;
+        match input.parse::<usize>() {
+            Ok(1) => return Ok(Style::Directory),
+            Ok(2) => return Ok(Style::Selector),
+            Ok(3) => return Ok(Style::Iterator),
+            Ok(_) | Err(_) => println!("Invalid input!"),
+        }
+    }
+}
+
+/// Constructs a `Folder` object based on user input. Prompts the user for various folder details,
+/// including TODO.
+///
+/// # Returns
+///
+/// * `Result<Folder, Box<dyn Error>>` which is Ok containing the constructed Folder object if all inputs are successfully gathered and parsed, or an Err otherwise.
+pub fn request_folder_input(conn: &Connection) -> Result<Folder, Box<dyn Error>> {
+    let parent_id = request_parent_id(conn)?;
+    let name = request_folder_name()?;
+    let style = request_style()?;
+
+    Ok(Folder {
+        id: 0,                      // Assuming these values are still hardcoded or otherwise set
+        parent_id: Some(parent_id), // TODO: Allow top-level folders to be added
+        name: name,
+        style: style,
+        status: None,
+    })
 }
 
 // pub fn select_task() -> Option<Action> {

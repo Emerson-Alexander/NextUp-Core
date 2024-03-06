@@ -1,8 +1,10 @@
 use core::panic;
+use std::collections::HashMap;
 
+use super::folders::{Folder, Style};
 use super::tasks::{Priority, Task};
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::{params, Connection, Error, OptionalExtension, Statement};
+use rusqlite::{params, Connection, Error, OptionalExtension, Result, Statement};
 
 /// Establishes connection to the SQLite db.
 ///
@@ -125,7 +127,29 @@ fn init_folders(conn: &Connection) {
     if is_table_empty("folders", conn) {
         conn.execute(
             "INSERT INTO folders (parent_id, name, style) VALUES (?, ?, ?)",
-            params![None::<i64>, DEFAULT_FOLDER_NAME, "directory"],
+            params![None::<i64>, DEFAULT_FOLDER_NAME, "Directory"],
+        )
+        .unwrap_or_else(|err| {
+            panic!("Problem inserting placeholder into folders table: {err}");
+        });
+        // TODO: Remove everything below here
+        conn.execute(
+            "INSERT INTO folders (parent_id, name, style) VALUES (?, ?, ?)",
+            params![1, "sub-folder", "Directory"],
+        )
+        .unwrap_or_else(|err| {
+            panic!("Problem inserting placeholder into folders table: {err}");
+        });
+        conn.execute(
+            "INSERT INTO folders (parent_id, name, style) VALUES (?, ?, ?)",
+            params![None::<i64>, "Work", "Directory"],
+        )
+        .unwrap_or_else(|err| {
+            panic!("Problem inserting placeholder into folders table: {err}");
+        });
+        conn.execute(
+            "INSERT INTO folders (parent_id, name, style) VALUES (?, ?, ?)",
+            params![2, "sub-sub-folder", "Directory"],
         )
         .unwrap_or_else(|err| {
             panic!("Problem inserting placeholder into folders table: {err}");
@@ -315,6 +339,73 @@ pub fn add_task(conn: &Connection, task: Task) {
     .unwrap_or_else(|err| {
         panic!("Problem adding task to table: {err}");
     });
+}
+
+/// Add a Folder to the folders table.
+///
+/// # Arguments
+///
+/// * `conn: &Connection` - Allows us to access the SQLite db.
+/// * `folder: &Folder` - The folder to add.
+///
+/// # Returns
+///
+/// Result indicating success or containing an error.
+pub fn add_folder(conn: &Connection, folder: &Folder) -> Result<()> {
+    conn.execute(
+        "INSERT INTO folders (
+            parent_id,
+            name,
+            style,
+            status
+        ) VALUES (?, ?, ?, ?)",
+        params![
+            folder.parent_id,
+            folder.name,
+            folder.style.to_string(),
+            folder.status
+        ],
+    )?;
+
+    Ok(())
+}
+
+// Function to recursively fetch and print the nested rows
+pub fn read_all_folders(
+    conn: &Connection,
+    parent_id: Option<u32>,
+    prefix: String,
+) -> Result<HashMap<u32, String>, Error> {
+    let mut stmt = conn.prepare("SELECT id, parent_id, name FROM folders WHERE parent_id IS ?")?;
+    let item_iter = stmt.query_map(params![parent_id], |row| {
+        Ok(Folder {
+            id: row.get(0)?,
+            parent_id: row.get(1)?,
+            name: row.get(2)?,
+            style: Style::Directory, // TODO: set
+            status: None,            // TODO: set
+        })
+    })?;
+
+    let mut folders_hm: HashMap<u32, String> = HashMap::new();
+
+    for item in item_iter {
+        let item = item?;
+        let new_prefix = if prefix.is_empty() {
+            item.name.clone()
+        } else {
+            format!("{}::{}", prefix, item.name)
+        };
+
+        // println!("({}, {})", item.id, new_prefix);
+        folders_hm.insert(item.id, new_prefix.clone());
+
+        // Recursively fetch children
+        // read_all_folders(conn, Some(item.id), new_prefix)?;
+        folders_hm.extend(read_all_folders(conn, Some(item.id), new_prefix)?);
+    }
+
+    Ok(folders_hm)
 }
 
 pub fn add_transaction(conn: &Connection, price: f64) {
