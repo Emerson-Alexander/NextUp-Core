@@ -5,6 +5,8 @@ mod tasks;
 mod ui;
 mod weighting;
 
+use std::io;
+
 use rusqlite::Connection;
 
 use crate::{
@@ -53,17 +55,18 @@ impl ToString for AppState {
 /// * `state: AppState` - Determines which state to assume.
 /// * `conn: Option<&Connection>` - Allows the new state to connect to the db
 /// if necessary.
-fn assume_state(state: AppState, conn: Option<&Connection>) {
+fn assume_state(state: AppState, conn: Option<&Connection>) -> Result<(), io::Error> {
     // Writing this once to avoid repeating myself
     let db_lost =
         String::from("Value was None, but expected Some(&Connection).\nLost connection to db.");
 
     match state {
-        AppState::AddFolder => add_folder(conn.expect(&db_lost)),
-        AppState::AddTask => add_task(conn.expect(&db_lost)),
+        // TODO: Remove Ok()s while improving error handling
+        AppState::AddFolder => Ok(add_folder(conn.expect(&db_lost))),
+        AppState::AddTask => Ok(add_task(conn.expect(&db_lost))),
         AppState::_EditTask => unimplemented!(),
-        AppState::MainLoop => main_loop(conn.expect(&db_lost)),
-        AppState::Shop => shop(conn.expect(&db_lost)),
+        AppState::MainLoop => Ok(main_loop(conn.expect(&db_lost))),
+        AppState::Shop => Ok(shop(conn.expect(&db_lost))),
         AppState::ToDo => to_do(conn.expect(&db_lost)),
     }
 }
@@ -89,7 +92,14 @@ pub fn startup() {
     // initialization has been completed. This stops the user from getting to
     // the program's main loop too early.
     ui::wait_for_interaction();
-    assume_state(AppState::MainLoop, Some(&conn))
+
+    match assume_state(AppState::MainLoop, Some(&conn)) {
+        Ok(_) => unimplemented!(),
+        Err(e) => {
+            eprintln!("Something went wrong: {e}\n\nReturning to main loop.");
+            main_loop(&conn);
+        }
+    }
 }
 
 /// Asks the user to select one of the top-level app states.
@@ -108,7 +118,7 @@ fn main_loop(conn: &Connection) {
     loop {
         ui::print_header(AppState::MainLoop);
 
-        assume_state(
+        let result = assume_state(
             ui::select_app_state(&[
                 AppState::ToDo,
                 AppState::Shop,
@@ -117,6 +127,11 @@ fn main_loop(conn: &Connection) {
             ]),
             Some(conn),
         );
+
+        match result {
+            Ok(_) => continue,
+            Err(e) => eprintln!("Something went wrong: {e}\n\nReturning to main loop."),
+        }
     }
 }
 
@@ -159,11 +174,36 @@ fn shop(conn: &Connection) {
     ui::wait_for_interaction();
 }
 
-fn to_do(conn: &Connection) {
+fn to_do(conn: &Connection) -> Result<(), io::Error> {
     ui::print_header(AppState::ToDo);
 
-    // Collect a list of all active tasks
-    let mut task_list = db::read_active_tasks(conn);
+    // Print the folder tree
+    // Request folder selection
+    let parent_id = ui::request_parent_id(conn)?;
+
+    // Construct a task list from folder
+    let mut folder_ids: Vec<u32> = vec![];
+    match db::get_descendant_ids(conn, parent_id) {
+        Ok(v) => folder_ids = v,
+        Err(e) => {
+            // Need to do error handling here because I can't propigate the rusqlite error
+            eprintln!("Error getting descendent ids: {e}\n\nReturning to main loop.");
+            // TODO: This is probably bad for memory usage... fix it
+            main_loop(conn);
+        }
+    }
+    folder_ids.push(parent_id);
+
+    // Get all tasks
+    let mut task_list: Vec<Task> = vec![];
+    match db::fetch_tasks_by_parent_ids(conn, folder_ids) {
+        Ok(rows) => {
+            for row in rows {
+                task_list.push(row)
+            }
+        }
+        Err(e) => eprintln!("Database error: {}", e),
+    }
 
     // Order the list
     task_list.sort_by(|a, b| {
@@ -207,6 +247,8 @@ fn to_do(conn: &Connection) {
     } else {
         db::archive_task(conn, selected_task.id);
     }
+
+    Ok(())
 }
 
 // fn task_selected(conn: &Connection, task: &Task) {

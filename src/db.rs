@@ -1,10 +1,11 @@
 use core::panic;
 use std::collections::HashMap;
+use std::io;
 
 use super::folders::{Folder, Style};
 use super::tasks::{Priority, Task};
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::{params, Connection, Error, OptionalExtension, Result, Statement};
+use rusqlite::{params, params_from_iter, Connection, Error, OptionalExtension, Result, Statement};
 
 /// Establishes connection to the SQLite db.
 ///
@@ -434,6 +435,56 @@ pub fn add_transaction(conn: &Connection, price: f64) {
     }
 }
 
+/// Retrieves the IDs of all descendants of the given parent_id, including those at deeper nesting levels.
+///
+/// # Arguments
+/// * `conn: &Connection` - A reference to the SQLite connection.
+/// * `parent_id: u32` - The ID of the parent for which descendant IDs are sought.
+///
+/// # Returns
+/// * A `Result` containing a vector of descendant IDs or an error if the query fails.
+pub fn get_descendant_ids(conn: &Connection, parent_id: u32) -> Result<Vec<u32>> {
+    // Define a recursive Common Table Expression (CTE) to find all descendants
+    let sql = "
+    WITH RECURSIVE descendants(id) AS (
+        SELECT id FROM folders WHERE parent_id = ?
+        UNION ALL
+        SELECT folders.id FROM folders, descendants WHERE folders.parent_id = descendants.id
+    )
+    SELECT id FROM descendants;
+    ";
+
+    // Prepare and execute the query, collecting the results
+    let mut stmt = conn.prepare(sql)?;
+    let descendant_ids = stmt
+        .query_map(params![parent_id], |row| row.get(0))?
+        .collect::<Result<Vec<u32>>>()?;
+
+    Ok(descendant_ids)
+}
+
+// fn main() -> Result<()> {
+//     // Example connection to a SQLite database
+//     let conn = Connection::open("my_database.db")?;
+
+//     // Assuming you want to find all descendants of the parent with ID 2
+//     let parent_id = 2;
+
+//     match get_descendant_ids(&conn, parent_id) {
+//         Ok(descendant_ids) => {
+//             println!(
+//                 "Descendants of parent ID {}: {:?}",
+//                 parent_id, descendant_ids
+//             );
+//         }
+//         Err(e) => {
+//             println!("Failed to get descendant IDs: {}", e);
+//         }
+//     }
+
+//     Ok(())
+// }
+
 /// Reads all active tasks from the db into memory.
 ///
 /// # Arguments
@@ -626,6 +677,101 @@ pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
 //     query_result_as_vec
 // }
 
+/// Fetches Tasks from the database where `parent_id` matches any u32 in the given vector.
+///
+/// # Arguments
+///
+/// * `conn: &Connection` - A reference to the SQLite connection.
+/// * `parent_ids: Vec<u32>` - A vector of `u32` representing parent IDs to query for.
+///
+/// # Returns
+///
+/// A result containing a vector of tuples, each representing a row from the database,
+/// or an error if the query fails.
+///
+/// # Examples
+///
+/// ```text
+/// let mut conn = Connection::open("my_database.db").unwrap();
+/// let parent_ids = vec![1, 2, 3];
+/// let rows = fetch_by_parent_ids(&mut conn, &parent_ids).unwrap();
+/// for row in rows {
+///     println!("{:?}", row);
+/// }
+/// ```
+pub fn fetch_tasks_by_parent_ids(conn: &Connection, parent_ids: Vec<u32>) -> Result<Vec<Task>> {
+    // Prepare the SQL query using parameterized placeholders.
+    // The number of placeholders must match the number of parent_ids.
+    // Produces an output like `SELECT * FROM my_table WHERE parent_id IN (?, ?, ?).`
+    let query = format!(
+        "SELECT * FROM tasks WHERE parent_id IN ({})",
+        parent_ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    // Prepare the statement.
+    let mut stmt = conn.prepare(&query)?;
+
+    // Convert `parent_ids` to a dynamic type that `rusqlite` can use for the query.
+    // We use `params_from_iter` to convert the vector into a suitable parameter list.
+    let params = params_from_iter(parent_ids.iter());
+
+    // Execute the query and map the results to a Vec of tuples (or whatever your row structure is).
+    let rows = stmt
+        .query_map(params, |row| {
+            let (average_duration, priority) = convert_fields_from_sql(row.get(5)?, row.get(10)?);
+
+            Ok(Task {
+                id: row.get(0)?,
+                parent_id: row.get(1)?,
+                is_archived: row.get(2)?,
+                summary: row.get(3)?,
+                description: row.get(4)?,
+                average_duration: average_duration,
+                bounty_modifier: row.get(6)?,
+                due_date: row.get(7)?,
+                from_date: row.get(8)?,
+                lead_days: row.get(9)?,
+                priority: priority,
+                repeat_interval: row.get(11)?,
+                times_selected: row.get(12)?,
+                times_shown: row.get(13)?,
+            })
+        })?
+        .collect();
+
+    rows
+}
+
+fn convert_fields_from_sql(
+    average_duration_row: Option<u32>,
+    priority_row: u32,
+) -> (Option<Duration>, Priority) {
+    let average_duration = match average_duration_row {
+        Some(d) => Some(Duration::seconds(d as i64)),
+        None => None,
+    };
+
+    let priority: Priority = {
+        if priority_row == 0 {
+            Priority::P0
+        } else if priority_row == 1 {
+            Priority::P1
+        } else if priority_row == 2 {
+            Priority::P2
+        } else if priority_row == 3 {
+            Priority::P3
+        } else {
+            Priority::P1
+        }
+    };
+
+    (average_duration, priority)
+}
+
 /// Helper function to query any statement that should result in a list of
 /// tasks.
 ///
@@ -648,25 +794,27 @@ pub fn read_all_tasks(conn: &Connection) -> Vec<Task> {
 fn tasks_from_stmt(mut stmt: Statement<'_>, include_inactive: bool) -> Vec<Task> {
     let rows = stmt
         .query_map([], |row| {
-            let average_duration = match row.get(5) {
-                Ok(Some(d)) => Some(Duration::seconds(d)),
-                Ok(None) => None,
-                Err(_) => None,
-            };
+            // let average_duration = match row.get(5) {
+            //     Ok(Some(d)) => Some(Duration::seconds(d)),
+            //     Ok(None) => None,
+            //     Err(_) => None,
+            // };
 
-            let priority: Priority = {
-                if row.get(10) == Ok(0) {
-                    Priority::P0
-                } else if row.get(10) == Ok(1) {
-                    Priority::P1
-                } else if row.get(10) == Ok(2) {
-                    Priority::P2
-                } else if row.get(10) == Ok(3) {
-                    Priority::P3
-                } else {
-                    Priority::P1
-                }
-            };
+            // let priority: Priority = {
+            //     if row.get(10) == Ok(0) {
+            //         Priority::P0
+            //     } else if row.get(10) == Ok(1) {
+            //         Priority::P1
+            //     } else if row.get(10) == Ok(2) {
+            //         Priority::P2
+            //     } else if row.get(10) == Ok(3) {
+            //         Priority::P3
+            //     } else {
+            //         Priority::P1
+            //     }
+            // };
+
+            let (average_duration, priority) = convert_fields_from_sql(row.get(5)?, row.get(10)?);
 
             Ok(Task {
                 id: row.get(0)?,

@@ -217,7 +217,7 @@ fn read_trimmed_line(prompt: &str) -> Result<String, io::Error> {
 /// # Returns
 ///
 /// * `Result<u32, io::Error>` containing the parent_id if successfully read, or an Err otherwise.
-fn request_parent_id(conn: &Connection) -> Result<u32, io::Error> {
+pub fn request_parent_id(conn: &Connection) -> Result<u32, io::Error> {
     loop {
         let hm = db::read_all_folders(conn, None, "".to_string()).unwrap();
 
